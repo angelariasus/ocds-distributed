@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [coordinator, limiter, ocds-mock, catalog, compiler, api]
+        service: [coordinator, limiter, ocds-mock, catalog, compiler, api, ledger]
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
@@ -67,7 +67,7 @@ jobs:
     needs: [go, python, silver]
     strategy:
       matrix:
-        service: [coordinator, limiter, ocds-mock, catalog, compiler, extractor, silver, gold, ml, api]
+        service: [coordinator, limiter, ocds-mock, catalog, compiler, extractor, silver, gold, ml, api, ledger]
     steps:
       - uses: actions/checkout@v4
       - run: docker build services/${{ matrix.service }}
