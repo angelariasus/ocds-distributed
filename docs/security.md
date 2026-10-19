@@ -4,13 +4,12 @@ Phase 8 answers four questions for a system whose parts talk over a network they
 who is on the other end of a connection, can anyone read or change what travels on it, what is
 each caller allowed to do, and how would anyone notice if stored history were altered.
 
-```
-client ──JWT──▶ Envoy ──mTLS──▶ api ×3 ──mTLS──▶ ml ×2
-                  │ verifies signature, issuer,      │
-                  │ audience, expiry (JWKS)          └──▶ authorizes by role
-extractor ──mTLS──▶ catalog ×5 ◀──mTLS──▶ catalog (gossip, replication, anti-entropy)
-extract.results, gold.events ──▶ ledger (Merkle log, signed heads) ◀── auditor (independent state)
-```
+![Security architecture: an internal CA issues service identities, Envoy verifies tokens, services talk over mutual TLS, and a Merkle ledger is checked by an independent auditor](assets/security.png)
+
+Envoy verifies the token's signature, issuer, audience and expiry against the published key set, the
+API authorizes by role, and every internal hop is mutually authenticated. The catalog nodes also
+use mutual TLS for gossip, replication and anti-entropy. The ledger attests `extract.results` and
+`gold.events`, and an auditor with its own state checks that the log only grows.
 
 ## Identities: an internal PKI
 
