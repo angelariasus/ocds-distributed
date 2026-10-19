@@ -78,6 +78,28 @@ x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
 
+x-coordinator-env: &coordinator-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
+  OCDS_BASE_URL: ${OCDS_BASE_URL:-https://contratacionesabiertas.oece.gob.pe/api/v1}
+  PLAN_SOURCES: ${PLAN_SOURCES:-seace_v3}
+  PLAN_FROM: ${PLAN_FROM:-2026-08}
+  PLAN_TO: ${PLAN_TO:-2026-09}
+  PLAN_INTERVAL: ${PLAN_INTERVAL:-6h}
+  PLAN_API_SOURCES: ${PLAN_API_SOURCES:-}
+  PLAN_API_PREFIX_LEN: ${PLAN_API_PREFIX_LEN:-0}
+  PLAN_API_PREFIXES: ${PLAN_API_PREFIXES:-}
+  RAFT_PEERS: coordinator1=http://coordinator1:7300,coordinator2=http://coordinator2:7300,coordinator3=http://coordinator3:7300
+
+# Three replicas of the planner, kept consistent by Raft: only the leader plans.
+x-coordinator: &coordinator
+  image: ocds-coordinator
+  build: ./services/coordinator
+  restart: unless-stopped
+  depends_on:
+    kafka-init: { condition: service_completed_successfully }
+
 services:
   kafka1:
     <<: *kafka
@@ -549,21 +571,32 @@ services:
       - ./deploy/toxiproxy/toxiproxy.json:/config/toxiproxy.json:ro
     depends_on: [ocds-mock]
 
-  coordinator:
-    build: ./services/coordinator
-    depends_on:
-      kafka-init: { condition: service_completed_successfully }
+  coordinator1:
+    <<: *coordinator
+    hostname: coordinator1
     environment:
-      <<: *otel-env
-      KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
-      OCDS_BASE_URL: ${OCDS_BASE_URL:-https://contratacionesabiertas.oece.gob.pe/api/v1}
-      PLAN_SOURCES: ${PLAN_SOURCES:-seace_v3}
-      PLAN_FROM: ${PLAN_FROM:-2026-08}
-      PLAN_TO: ${PLAN_TO:-2026-09}
-      PLAN_INTERVAL: ${PLAN_INTERVAL:-6h}
-      PLAN_API_SOURCES: ${PLAN_API_SOURCES:-}
-      PLAN_API_PREFIX_LEN: ${PLAN_API_PREFIX_LEN:-0}
-      PLAN_API_PREFIXES: ${PLAN_API_PREFIXES:-}
+      <<: *coordinator-env
+      RAFT_ID: coordinator1
+    volumes:
+      - coordinator1:/data
+
+  coordinator2:
+    <<: *coordinator
+    hostname: coordinator2
+    environment:
+      <<: *coordinator-env
+      RAFT_ID: coordinator2
+    volumes:
+      - coordinator2:/data
+
+  coordinator3:
+    <<: *coordinator
+    hostname: coordinator3
+    environment:
+      <<: *coordinator-env
+      RAFT_ID: coordinator3
+    volumes:
+      - coordinator3:/data
 
   extractor:
     build: ./services/extractor
@@ -592,6 +625,9 @@ services:
       - ./deploy/pki:/pki:ro
 
 volumes:
+  coordinator1:
+  coordinator2:
+  coordinator3:
   ledger:
   ledger-auditor:
   etcd1:

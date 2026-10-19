@@ -4,7 +4,7 @@ global:
 scrape_configs:
   - job_name: coordinator
     static_configs:
-      - targets: ["coordinator:2112"]
+      - targets: ["coordinator1:2112", "coordinator2:2112", "coordinator3:2112"]
 
   - job_name: extractor
     dns_sd_configs:
