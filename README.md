@@ -14,7 +14,7 @@ The portal publishes ~2.76 million procurement records (2004–2026, two source 
 monthly bulk files plus a cursor-paginated API. See [docs/ocds-api.md](docs/ocds-api.md) for what
 was measured and how it shapes the design.
 
-## Status: phase 5 — Silver on Spark
+## Status: phase 6 — Gold warehouse
 
 ```
 coordinator (Go) ──▶ Kafka: extract.tasks ──▶ extractor ×N (Python) ──▶ Garage (S3, RF=3)
@@ -30,6 +30,8 @@ coordinator (Go) ──▶ Kafka: extract.tasks ──▶ extractor ×N (Python)
            extractor ──▶ Kafka: bronze.records ──▶ compiler ×2 (Go, CRDT) ──▶ Kafka: records.compiled (compacted)
 
            records.compiled ──▶ Spark cluster (master + workers): silver-batch, silver-stream ──▶ Garage: silver/ (Parquet)
+
+           silver/ ──▶ gold-loader (saga, lease in etcd, fencing) ──▶ PostgreSQL ×3 (Patroni/etcd, HAProxy) ──▶ outbox relay ──▶ Kafka: gold.events
 ```
 
 Two task kinds flow through `extract.tasks`:
@@ -47,6 +49,7 @@ Two task kinds flow through `extract.tasks`:
 | `services/catalog` | Dynamo-style key-value store holding crawl checkpoints: consistent-hashing ring, N/R/W quorums, vector clocks with client-side conflict resolution, hinted handoff, read repair, SWIM-style gossip membership, Merkle anti-entropy, write-ahead log | Partitioning, replication, tunable consistency, failure detection, eventual consistency, reconciliation |
 | `services/compiler` | Merges every sighting of an OCID (bulk files, API pages, redeliveries, any order) into one record modelled as a state-based CRDT, stamped with Lamport time; state lives in a compacted Kafka topic that doubles as changelog for restoration after rebalances | CRDTs, logical clocks, convergence, co-partitioning, state restoration, idempotency under at-least-once |
 | `services/silver` | PySpark jobs on a standalone Spark cluster: batch flattening of compiled records to one row per tender item (Parquet by fiscal year) and a Structured Streaming query with event-time windows and watermarks | Data-parallel processing, shuffles, horizontal speed-up, stream processing, event time vs. arrival time, late data, exactly-once sinks |
+| `services/gold` | Loads the star schema into a Patroni-managed PostgreSQL cluster as a saga: lease with fencing token in etcd, staging, one-transaction swap with a transactional outbox relayed to Kafka | Leader election and automatic failover, consensus (etcd/Raft), distributed mutual exclusion, fencing, sagas, outbox instead of 2PC |
 | `services/ocds-mock` | Portal replica with measured behaviour (WAF, page-size cap, latency that grows with concurrency); behind Toxiproxy for chaos | Fault injection, repeatable experiments |
 | Kafka (3 brokers, KRaft) | Durable task and result log, RF=3, `min.insync.replicas=2` | Replicated log, quorum writes, leader election per partition |
 | Garage (4 nodes) | S3-compatible object store for the Bronze layer | Replication, consistent hashing, CRDT-based metadata |
@@ -80,7 +83,7 @@ Plan window and worker count live in `.env` (`PLAN_SOURCES`, `PLAN_FROM`, `PLAN_
 The portal is a public government service: keep the plan window small during development and
 never run load or chaos experiments against it. Use the simulation profile instead, see
 [docs/simulation.md](docs/simulation.md). The catalog's design and its live experiments are in
-[docs/catalog.md](docs/catalog.md); the record compiler's in [docs/compiler.md](docs/compiler.md); Silver's in [docs/silver.md](docs/silver.md). What the live runs taught, and what it changed, is in
+[docs/catalog.md](docs/catalog.md); the record compiler's in [docs/compiler.md](docs/compiler.md); Silver's in [docs/silver.md](docs/silver.md); Gold's in [docs/gold.md](docs/gold.md). What the live runs taught, and what it changed, is in
 [docs/lessons.md](docs/lessons.md).
 
 ## Development
@@ -107,7 +110,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 3. ~~Catalog: Dynamo-style key-value store (consistent hashing, quorum, vector clocks, gossip, Merkle anti-entropy)~~
 4. ~~Record compiler: logical clocks and CRDT merge of out-of-order OCDS releases~~
 5. ~~Silver: Spark cluster, batch and Structured Streaming with watermarks~~
-6. Gold: sharded PostgreSQL with automatic failover, saga/outbox loading, fencing tokens
+6. ~~Gold: PostgreSQL with automatic failover, saga/outbox loading, fencing tokens~~
 7. Query API (gRPC/REST), load balancing, caching, ML serving, dashboard
 8. Security: mTLS, secrets management, Merkle audit ledger
 9. Chaos experiments and benchmarks; Raft-based coordinator replication

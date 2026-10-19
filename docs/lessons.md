@@ -49,6 +49,22 @@ protect against a broker failing, not against all three brokers being recreated 
 disks. The same check (does the process actually write where the volume is?) was applied to
 Garage and the catalog, which were fine.
 
+## A lease without a fence is not a lock
+
+The stalled-loader test first used `time.sleep` to simulate a pause. It proved nothing: the
+keep-alive thread kept refreshing the etcd lease while the main thread slept, so the second loader
+just waited. Freezing the container (`docker pause`) reproduced the real failure: the lease
+expired, a second loader loaded and committed, the first one woke up with no idea it had lost the
+lock and ran all the way to the swap, where only the fencing token check stopped it.
+([gold.md](gold.md))
+
+## Measure the number of workers, not just the number of records
+
+Three Spark workers were slower than one on every data size tried on a single laptop, up to 2.9
+million rows. The parallel part of the job is cheap and the fixed part (JVM start-up, Kafka read,
+shuffle, S3A commit) is not; extra executors on the same CPU add coordination without adding
+compute. ([silver.md](silver.md))
+
 ## Streaming numbers are not JSON numbers
 
 `ijson` yields `Decimal` for every number, and `json.dumps` rejects it; the bulk emitter failed on
