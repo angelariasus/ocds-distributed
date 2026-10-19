@@ -260,7 +260,7 @@ func attest(log *slog.Logger, l *ledgerlog.Log, r *kgo.Record) error {
 		if err := json.Unmarshal(r.Value, &res); err != nil {
 			return err
 		}
-		if res.SHA256 == "" || (res.Status != "stored" && res.Status != "skipped") {
+		if res.SHA256 == "" || (res.Status != "stored" && res.Status != "skipped" && res.Status != "reemitted") {
 			return nil
 		}
 		idx, created, err := append_(l, "bronze.object", res.ObjectKey, res.SHA256, map[string]string{"task_id": res.TaskID})
