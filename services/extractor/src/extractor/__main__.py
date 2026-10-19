@@ -2,7 +2,7 @@ import logging
 
 from . import telemetry
 from .breaker import CircuitBreaker
-from .catalog import Catalog
+from .catalog import Catalog, mtls_credentials
 from .config import Settings
 from .crawler import RangeCrawler
 from .events import Emitter
@@ -19,6 +19,14 @@ def main() -> None:
     provider = telemetry.setup("extractor", settings.metrics_port)
     store = S3Store(settings.s3_endpoint, settings.s3_access_key, settings.s3_secret_key, settings.s3_bucket)
     http = OcdsHttp()
+    catalog = None
+    if settings.catalog_addrs:
+        creds = (
+            mtls_credentials(settings.catalog_tls_ca, settings.catalog_tls_cert, settings.catalog_tls_key)
+            if settings.catalog_tls_cert
+            else None
+        )
+        catalog = Catalog(settings.catalog_addrs, credentials=creds)
     worker = Worker(settings)
     emitter = Emitter(worker.producer, settings.observations_topic, settings.worker_id)
     crawler = RangeCrawler(
@@ -28,7 +36,7 @@ def main() -> None:
         CircuitBreaker("ocds-portal", settings.breaker_failures, settings.breaker_recovery_seconds),
         settings.ocds_base_url,
         page_size=settings.page_size,
-        catalog=Catalog(settings.catalog_addrs) if settings.catalog_addrs else None,
+        catalog=catalog,
         emitter=emitter,
     )
     extractor = Extractor(

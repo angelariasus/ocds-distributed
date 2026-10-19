@@ -23,9 +23,15 @@ class Entry:
 class Catalog:
     """Client of the Dynamo-style catalog; any node can coordinate, so one is picked at random per call."""
 
-    def __init__(self, addresses: list[str], timeout: float = 5.0, stubs=None):
+    def __init__(
+        self, addresses: list[str], timeout: float = 5.0, stubs=None, credentials: grpc.ChannelCredentials | None = None
+    ):
         self.timeout = timeout
-        self.stubs = stubs or [catalog_pb2_grpc.CatalogStub(grpc.insecure_channel(addr)) for addr in addresses]
+
+        def channel(addr: str) -> grpc.Channel:
+            return grpc.secure_channel(addr, credentials) if credentials else grpc.insecure_channel(addr)
+
+        self.stubs = stubs or [catalog_pb2_grpc.CatalogStub(channel(addr)) for addr in addresses]
 
     def _stub(self):
         return random.choice(self.stubs)
@@ -55,3 +61,13 @@ class Catalog:
             log.warning("catalog put %s failed: %s", key, err.code())
             return None
         return resp.context
+
+
+def mtls_credentials(ca: str, cert: str, key: str) -> grpc.ChannelCredentials:
+    """Client identity for mutual TLS: the catalog rejects callers without a certificate from the internal CA."""
+
+    def read(path: str) -> bytes:
+        with open(path, "rb") as fh:
+            return fh.read()
+
+    return grpc.ssl_channel_credentials(root_certificates=read(ca), private_key=read(key), certificate_chain=read(cert))

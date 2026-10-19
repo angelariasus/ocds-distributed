@@ -26,6 +26,9 @@ class Settings:
     breaker_recovery_seconds: float
     catalog_addrs: list[str]
     observations_topic: str
+    catalog_tls_ca: str
+    catalog_tls_cert: str
+    catalog_tls_key: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,4 +55,7 @@ class Settings:
             breaker_recovery_seconds=float(env("BREAKER_RECOVERY_SECONDS", "30")),
             catalog_addrs=[a.strip() for a in env("CATALOG_ADDRS", "").split(",") if a.strip()],
             observations_topic=env("OBSERVATIONS_TOPIC", "bronze.records"),
+            catalog_tls_ca=env("CATALOG_TLS_CA", ""),
+            catalog_tls_cert=env("CATALOG_TLS_CERT", ""),
+            catalog_tls_key=env("CATALOG_TLS_KEY", ""),
         )
