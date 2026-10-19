@@ -31,7 +31,7 @@ Scale workers beyond what the upstream tolerates and watch the limiter back off:
 ```sh
 MOCK_PER_INFLIGHT_LATENCY=700ms LIMITER_LATENCY_HIGH=2s \
 docker compose --profile sim up -d --scale extractor=8 ocds-mock limiter extractor
-docker compose restart coordinator   # re-plans the same tasks; stored pages are overwritten idempotently
+bash scripts/plan_now.sh                # the Raft leader re-plans; stored pages are overwritten idempotently
 ```
 
 Prometheus series to plot: `limiter_rate_permits_per_second`, `limiter_window_p95_seconds`,

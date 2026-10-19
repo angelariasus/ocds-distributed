@@ -14,7 +14,7 @@ The portal publishes ~2.76 million procurement records (2004–2026, two source 
 monthly bulk files plus a cursor-paginated API. See [docs/ocds-api.md](docs/ocds-api.md) for what
 was measured and how it shapes the design.
 
-## Status: phase 8 — security
+## Status: all nine phases complete
 
 ```
 coordinator (Go) ──▶ Kafka: extract.tasks ──▶ extractor ×N (Python) ──▶ Garage (S3, RF=3)
@@ -45,7 +45,7 @@ Two task kinds flow through `extract.tasks`:
 
 | Component | Role | Distributed-systems topics it exercises |
 |---|---|---|
-| `services/coordinator` | Lists the portal's bulk files, plans one task per (source, year, month), publishes to Kafka | Work partitioning, message-oriented middleware |
+| `services/coordinator` | Three replicas kept consistent by our own Raft (PreVote, CheckQuorum, persistence); only the leader plans, through a replicated schedule that lets a new leader finish a round the old one left half done | Consensus, leader election, replicated state machines, work partitioning |
 | `services/extractor` | Consumer group of workers: download or crawl, verify, store, publish result | Horizontal scaling, consumer rebalancing, at-least-once delivery, idempotency, retries with backoff, circuit breaker, dead-letter queue |
 | `services/limiter` | gRPC service handing out permits from a token bucket whose rate adapts with additive-increase/multiplicative-decrease on p95 latency and throttling signals | Coordination, RPC, feedback control, graceful degradation (workers fall back to a local rate if it is down) |
 | `services/catalog` | Dynamo-style key-value store holding crawl checkpoints: consistent-hashing ring, N/R/W quorums, vector clocks with client-side conflict resolution, hinted handoff, read repair, SWIM-style gossip membership, Merkle anti-entropy, write-ahead log | Partitioning, replication, tunable consistency, failure detection, eventual consistency, reconciliation |
@@ -74,7 +74,8 @@ the images build everything inside containers.
 python scripts/gen_env.py > .env
 bash scripts/gen_pki.sh            # internal CA, service certificates, signing keys (deploy/pki, not committed)
 docker compose up -d --build
-docker compose logs -f coordinator extractor
+docker compose logs -f coordinator1 coordinator2 coordinator3 extractor
+bash scripts/plan_now.sh            # start a planning round now instead of waiting for PLAN_INTERVAL
 ```
 
 | UI | URL |
@@ -93,7 +94,7 @@ Plan window and worker count live in `.env` (`PLAN_SOURCES`, `PLAN_FROM`, `PLAN_
 The portal is a public government service: keep the plan window small during development and
 never run load or chaos experiments against it. Use the simulation profile instead, see
 [docs/simulation.md](docs/simulation.md). The catalog's design and its live experiments are in
-[docs/catalog.md](docs/catalog.md); the record compiler's in [docs/compiler.md](docs/compiler.md); Silver's in [docs/silver.md](docs/silver.md); Gold's in [docs/gold.md](docs/gold.md); the serving layer's in [docs/serving.md](docs/serving.md); security in [docs/security.md](docs/security.md). What the live runs taught, and what it changed, is in
+[docs/catalog.md](docs/catalog.md); the record compiler's in [docs/compiler.md](docs/compiler.md); Silver's in [docs/silver.md](docs/silver.md); Gold's in [docs/gold.md](docs/gold.md); the serving layer's in [docs/serving.md](docs/serving.md); security in [docs/security.md](docs/security.md); consensus in [docs/consensus.md](docs/consensus.md); chaos, CAP and benchmarks in [docs/chaos.md](docs/chaos.md). What the live runs taught, and what it changed, is in
 [docs/lessons.md](docs/lessons.md).
 
 ## Development
@@ -123,4 +124,4 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 6. ~~Gold: PostgreSQL with automatic failover, saga/outbox loading, fencing tokens~~
 7. ~~Query API (gRPC/REST), load balancing, caching, ML serving, dashboard~~
 8. ~~Security: internal PKI, mutual TLS, JWT at the edge with role authorization, Merkle transparency log with auditors~~
-9. Chaos experiments and benchmarks; Raft-based coordinator replication
+9. ~~Raft-replicated coordinator, CAP experiments across every replicated system, tunable-consistency benchmarks~~

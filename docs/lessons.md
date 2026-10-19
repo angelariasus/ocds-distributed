@@ -73,6 +73,36 @@ with retries and outlier ejection, which is why killing an API replica cost zero
 while the ML path showed one. Any DNS-based discovery needs either retries or a push-based
 resolver on top. ([serving.md](serving.md))
 
+## A healed partition is not a merged cluster
+
+After a network partition was repaired, the catalog stayed split for good: two nodes each saw a
+ring of one, the rest listed them as dead, and the islands kept accepting writes with W=1. Gossip
+only probed members it believed alive and contacted seeds only at start-up, so once both sides had
+expired each other nothing ever reached across again; and peers that had not yet expired a dead
+member kept re-introducing it to those that had. Every earlier failure test had restarted the
+failed process, which re-reads its seeds and hides the problem. Probing seeds and dead members
+every few rounds, and ignoring news of the death of a node one has never heard of, made the
+cluster merge 10 s after the network healed. ([chaos.md](chaos.md))
+
+## A probe that cannot fail proves nothing
+
+The CAP experiment first reported Kafka accepting writes with two of three brokers down. The
+console producer exits 0 even when delivery fails, so the probe could not tell success from
+failure. Success is now judged by reading the record back, and the result reversed. Every check
+in `scripts/` that reports "ok" has to be able to report "failed" too.
+
+## Textbook Raft lets one lonely node depose a healthy leader
+
+The first live partition test left `coordinator3` cut off for fourteen minutes. Following the
+basic algorithm, it timed out, became a candidate, incremented its term, failed to win, and did it
+again: 348 elections, term 4 → 348. When the network came back, its higher term forced the healthy
+leader to step down; in ten seconds the cluster changed leader five times and ended at term 362,
+with nothing actually broken. Two additions from Raft's own author fix it: **PreVote** (a node asks
+whether it could win before incrementing its term, and peers that still hear a leader say no) and
+**CheckQuorum** (a leader that cannot reach a majority steps down instead of believing it still
+leads). The unit tests did not catch it, because they never left a node isolated for long; the
+live run did in one try. ([consensus.md](consensus.md))
+
 ## A valid signature is not evidence of honesty
 
 The tampered ledger in the integrity experiment served a new tree head with a perfectly valid
