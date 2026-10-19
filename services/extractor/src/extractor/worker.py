@@ -44,6 +44,9 @@ class Worker:
                 "client.id": settings.worker_id,
                 "enable.idempotence": True,
                 "acks": "all",
+                # Observations are verbose JSON: compressing batches cuts what Kafka stores (x3 replicas).
+                "compression.type": "zstd",
+                "linger.ms": 20,
             }
         )
 
