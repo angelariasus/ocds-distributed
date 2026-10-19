@@ -20,7 +20,6 @@ from botocore.config import Config
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
@@ -29,14 +28,19 @@ log = logging.getLogger(__name__)
 FEATURES = ["monto_referencial", "metodo", "categoria", "departamento", "es_essalud"]
 MODEL_PREFIX = "models/lead_time"
 
+# Only processes called at least HORIZON_DAYS before the data cutoff have had time to sign: newer
+# ones are right-censored (only the fast ones have a lead time yet) and would bias the model low.
+HORIZON_DAYS = 180
+
 TRAINING_SQL = """
 SELECT f.monto_referencial, t.metodo, coalesce(i.clasificacion, 'SIN-CLASIFICACION') AS categoria,
-       coalesce(e.departamento, '') AS departamento, e.es_essalud, f.lead_time_dias
+       coalesce(e.departamento, '') AS departamento, e.es_essalud, f.lead_time_dias,
+       to_date(f.fk_tiempo_convocatoria::text, 'YYYYMMDD') AS fecha_convocatoria
   FROM gold.fact_items f
   JOIN gold.dim_entidad_compradora e ON e.sk_entidad = f.fk_entidad
   JOIN gold.dim_tipo_proceso t ON t.sk_tipo_proceso = f.fk_tipo_proceso
   LEFT JOIN gold.dim_item i ON i.sk_item = f.fk_item
- WHERE f.lead_time_dias IS NOT NULL AND f.lead_time_dias BETWEEN 0 AND 730 AND f.monto_referencial IS NOT NULL
+ WHERE f.monto_referencial IS NOT NULL AND f.fk_tiempo_convocatoria IS NOT NULL
 """
 
 
@@ -46,6 +50,9 @@ class ModelInfo:
     trained_at: str
     training_rows: int
     mae_dias: float
+    horizon_dias: int = 0
+    cohort_until: str = ""
+    signed_within_horizon_pct: float = 0.0
 
 
 def _s3():
@@ -71,15 +78,29 @@ def build_pipeline() -> Pipeline:
     return Pipeline([("features", features), ("model", HistGradientBoostingRegressor(max_iter=200, learning_rate=0.05, random_state=7))])
 
 
-def train(frame: pd.DataFrame) -> tuple[Pipeline, ModelInfo]:
-    frame = frame.dropna(subset=["lead_time_dias"]).copy()
-    frame["es_essalud"] = frame["es_essalud"].astype(int)
-    x, y = frame[FEATURES], frame["lead_time_dias"].astype(float)
-    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=7)
-    pipeline = build_pipeline().fit(x_train, y_train)
-    mae = float(mean_absolute_error(y_test, pipeline.predict(x_test)))
-    version = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return pipeline, ModelInfo(version=version, trained_at=datetime.now(UTC).isoformat(), training_rows=len(frame), mae_dias=mae)
+def train(frame: pd.DataFrame, horizon: int = HORIZON_DAYS) -> tuple[Pipeline, ModelInfo]:
+    """Fits on the uncensored cohort and evaluates on its newest 20% (a time split, not a random one)."""
+    frame = frame.copy()
+    frame["fecha_convocatoria"] = pd.to_datetime(frame["fecha_convocatoria"])
+    cohort_until = frame["fecha_convocatoria"].max() - pd.Timedelta(days=horizon)
+    cohort = frame[frame["fecha_convocatoria"] <= cohort_until]
+    signed = cohort[cohort["lead_time_dias"].between(0, horizon)].sort_values("fecha_convocatoria").copy()
+    signed["es_essalud"] = signed["es_essalud"].astype(int)
+    cut = int(len(signed) * 0.8)
+    train_part, test_part = signed.iloc[:cut], signed.iloc[cut:]
+    pipeline = build_pipeline().fit(train_part[FEATURES], train_part["lead_time_dias"].astype(float))
+    mae = float(mean_absolute_error(test_part["lead_time_dias"].astype(float), pipeline.predict(test_part[FEATURES])))
+    now = datetime.now(UTC)
+    info = ModelInfo(
+        version=now.strftime("%Y%m%dT%H%M%SZ"),
+        trained_at=now.isoformat(),
+        training_rows=len(signed),
+        mae_dias=mae,
+        horizon_dias=horizon,
+        cohort_until=cohort_until.date().isoformat(),
+        signed_within_horizon_pct=round(100.0 * len(signed) / max(len(cohort), 1), 1),
+    )
+    return pipeline, info
 
 
 def publish(pipeline: Pipeline, info: ModelInfo, bucket: str) -> str:
@@ -89,7 +110,7 @@ def publish(pipeline: Pipeline, info: ModelInfo, bucket: str) -> str:
     key = f"{MODEL_PREFIX}/{info.version}.joblib"
     s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue(), ContentType="application/octet-stream")
     s3.put_object(Bucket=bucket, Key=f"{MODEL_PREFIX}/latest", Body=json.dumps({"key": key, **info.__dict__}).encode(), ContentType="application/json")
-    log.info("model published: s3://%s/%s (mae %.1f days, %d rows)", bucket, key, info.mae_dias, info.training_rows)
+    log.info("model published: s3://%s/%s (mae %.1f d, time split, %d rows, until %s)", bucket, key, info.mae_dias, info.training_rows, info.cohort_until)
     return key
 
 
