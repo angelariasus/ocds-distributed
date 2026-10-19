@@ -63,10 +63,20 @@ def main() -> None:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=8))
     predict_pb2_grpc.add_PredictorServicer_to_server(Predictor(pipeline, info, served_by), server)
     health_pb2_grpc.add_HealthServicer_to_server(health.HealthServicer(), server)
-    server.add_insecure_port(f"[::]:{env('GRPC_PORT', '9000')}")
+    port = f"[::]:{env('GRPC_PORT', '9000')}"
+    if env("TLS_CERT"):
+        # Mutual TLS: only callers holding a certificate from the internal CA (the API) get through.
+        def read(path: str) -> bytes:
+            with open(path, "rb") as fh:
+                return fh.read()
+
+        creds = grpc.ssl_server_credentials([(read(env("TLS_KEY")), read(env("TLS_CERT")))], root_certificates=read(env("TLS_CA")), require_client_auth=True)
+        server.add_secure_port(port, creds)
+    else:
+        server.add_insecure_port(port)
     start_http_server(int(env("METRICS_PORT", "8000")))
     server.start()
-    log.info("serving model %s on :%s as %s", info.version, env("GRPC_PORT", "9000"), served_by)
+    log.info("serving model %s on :%s as %s (mtls=%s)", info.version, env("GRPC_PORT", "9000"), served_by, bool(env("TLS_CERT")))
     server.wait_for_termination()
 
 
