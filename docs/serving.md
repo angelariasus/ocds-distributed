@@ -128,10 +128,11 @@ dashboard) next to the API's cache hit ratio and p99 from Prometheus.
 ```sh
 docker compose --profile serve up -d                                   # redis ×6, ml ×2, api ×3, envoy
 docker compose --profile serve --profile serve-jobs run --rm ml-train  # train and publish a model
-curl 'localhost:8090/v1/top-buyers?year=2026&limit=5'
-curl 'localhost:8090/v1/buyers/20131257750'
-curl 'localhost:8090/v1/items?q=paracetamol&limit=5'
-curl -X POST localhost:8090/v1/predict/lead-time -d '{"monto_referencial":250000,"metodo":"open","categoria":"goods","departamento":"LIMA","es_essalud":true}'
+TOKEN=$(bash scripts/mint_token.sh analyst)                           # since phase 8 every call needs a JWT
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8090/v1/top-buyers?year=2026&limit=5'
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8090/v1/buyers/20131257750'
+curl -H "Authorization: Bearer $TOKEN" 'localhost:8090/v1/items?q=paracetamol&limit=5'
+curl -H "Authorization: Bearer $TOKEN" -X POST localhost:8090/v1/predict/lead-time -d '{"monto_referencial":250000,"metodo":"open","categoria":"goods","departamento":"LIMA","es_essalud":true}'
 docker compose --profile serve kill api-2        # Envoy ejects it; the other replicas take the traffic
 ```
 

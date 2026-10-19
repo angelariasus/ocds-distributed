@@ -14,7 +14,7 @@ The portal publishes ~2.76 million procurement records (2004–2026, two source 
 monthly bulk files plus a cursor-paginated API. See [docs/ocds-api.md](docs/ocds-api.md) for what
 was measured and how it shapes the design.
 
-## Status: phase 7 — serving layer
+## Status: phase 8 — security
 
 ```
 coordinator (Go) ──▶ Kafka: extract.tasks ──▶ extractor ×N (Python) ──▶ Garage (S3, RF=3)
@@ -54,6 +54,8 @@ Two task kinds flow through `extract.tasks`:
 | `services/gold` | Loads the star schema into a Patroni-managed PostgreSQL cluster as a saga: lease with fencing token in etcd, staging, one-transaction swap with a transactional outbox relayed to Kafka | Leader election and automatic failover, consensus (etcd/Raft), distributed mutual exclusion, fencing, sagas, outbox instead of 2PC |
 | `services/api` | Query service over Gold, gRPC and REST from one implementation, behind Envoy (DNS discovery, least-request, retries, outlier ejection); reads from PostgreSQL replicas; cache-aside on a Redis Cluster invalidated by `gold.events` | RPC, service discovery, load balancing, caching, read scaling, timeouts and retries |
 | `services/ml` | Lead-time model trained from Gold, published as a versioned artifact to the object store and served by gRPC replicas balanced client-side by the API | Model serving, immutable artifacts, client-side load balancing, deadlines |
+| `services/ledger` | Append-only transparency log (RFC 6962 Merkle tree, Ed25519-signed tree heads, inclusion and consistency proofs) attesting every Bronze object and Gold load from Kafka; `ledger audit` is an independent auditor | Integrity, tamper evidence, signed state, distributed trust through auditors |
+| PKI, mTLS, JWT | Internal CA and per-service identities; mutual TLS on every service-to-service hop; Envoy verifies ES256 tokens, the API authorizes by role | Secure channels, mutual authentication, authentication vs. authorization, trust boundaries |
 | `services/ocds-mock` | Portal replica with measured behaviour (WAF, page-size cap, latency that grows with concurrency); behind Toxiproxy for chaos | Fault injection, repeatable experiments |
 | Kafka (3 brokers, KRaft) | Durable task and result log, RF=3, `min.insync.replicas=2` | Replicated log, quorum writes, leader election per partition |
 | Garage (4 nodes) | S3-compatible object store for the Bronze layer | Replication, consistent hashing, CRDT-based metadata |
@@ -70,6 +72,7 @@ the images build everything inside containers.
 
 ```sh
 python scripts/gen_env.py > .env
+bash scripts/gen_pki.sh            # internal CA, service certificates, signing keys (deploy/pki, not committed)
 docker compose up -d --build
 docker compose logs -f coordinator extractor
 ```
@@ -90,7 +93,7 @@ Plan window and worker count live in `.env` (`PLAN_SOURCES`, `PLAN_FROM`, `PLAN_
 The portal is a public government service: keep the plan window small during development and
 never run load or chaos experiments against it. Use the simulation profile instead, see
 [docs/simulation.md](docs/simulation.md). The catalog's design and its live experiments are in
-[docs/catalog.md](docs/catalog.md); the record compiler's in [docs/compiler.md](docs/compiler.md); Silver's in [docs/silver.md](docs/silver.md); Gold's in [docs/gold.md](docs/gold.md); the serving layer's in [docs/serving.md](docs/serving.md). What the live runs taught, and what it changed, is in
+[docs/catalog.md](docs/catalog.md); the record compiler's in [docs/compiler.md](docs/compiler.md); Silver's in [docs/silver.md](docs/silver.md); Gold's in [docs/gold.md](docs/gold.md); the serving layer's in [docs/serving.md](docs/serving.md); security in [docs/security.md](docs/security.md). What the live runs taught, and what it changed, is in
 [docs/lessons.md](docs/lessons.md).
 
 ## Development
@@ -119,5 +122,5 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 5. ~~Silver: Spark cluster, batch and Structured Streaming with watermarks~~
 6. ~~Gold: PostgreSQL with automatic failover, saga/outbox loading, fencing tokens~~
 7. ~~Query API (gRPC/REST), load balancing, caching, ML serving, dashboard~~
-8. Security: mTLS, secrets management, Merkle audit ledger
+8. ~~Security: internal PKI, mutual TLS, JWT at the edge with role authorization, Merkle transparency log with auditors~~
 9. Chaos experiments and benchmarks; Raft-based coordinator replication

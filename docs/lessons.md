@@ -73,6 +73,20 @@ with retries and outlier ejection, which is why killing an API replica cost zero
 while the ML path showed one. Any DNS-based discovery needs either retries or a push-based
 resolver on top. ([serving.md](serving.md))
 
+## A valid signature is not evidence of honesty
+
+The tampered ledger in the integrity experiment served a new tree head with a perfectly valid
+Ed25519 signature: the operator who rewrites the log also holds the signing key. What caught it
+was an auditor that remembered an earlier head and demanded a consistency proof. Signatures prove
+*who* said something; only state held by someone else proves they did not change their story.
+([security.md](security.md))
+
+## Restores are deployments too
+
+Restoring the honest ledger file from a root shell left it owned by root, and the ledger, which
+runs unprivileged, refused to start. Recovery procedures run with different privileges than the
+service they recover, and need the same ownership checks as a release.
+
 ## Streaming numbers are not JSON numbers
 
 `ijson` yields `Decimal` for every number, and `json.dumps` rejects it; the bulk emitter failed on
