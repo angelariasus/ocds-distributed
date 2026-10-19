@@ -1,0 +1,159 @@
+syntax = "proto3";
+
+package catalog.v1;
+
+option go_package = "github.com/angelariasus/ocds-distributed/services/catalog/gen/catalogv1;catalogv1";
+
+// Client-facing API of the Dynamo-style key-value store. Any node can serve
+// any request; it coordinates the quorum on the caller's behalf.
+service Catalog {
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc Put(PutRequest) returns (PutResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
+
+// Node-to-node API: replication, failure detection and anti-entropy.
+service Internal {
+  rpc ReplicaGet(ReplicaGetRequest) returns (ReplicaGetResponse);
+  rpc ReplicaPut(ReplicaPutRequest) returns (ReplicaPutResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc PingReq(PingReqRequest) returns (PingReqResponse);
+  rpc TreeLevel(TreeLevelRequest) returns (TreeLevelResponse);
+  rpc BucketKeys(BucketKeysRequest) returns (BucketKeysResponse);
+}
+
+message VectorClock {
+  map<string, uint64> entries = 1;
+}
+
+message Version {
+  bytes value = 1;
+  VectorClock clock = 2;
+  bool tombstone = 3;
+  int64 updated_at_ms = 4;
+}
+
+message GetRequest {
+  string key = 1;
+  // Replicas that must answer; 0 uses the node's default R.
+  uint32 r = 2;
+}
+
+message GetResponse {
+  // Every concurrent version still alive; one entry unless writes conflicted.
+  repeated Version versions = 1;
+  // Opaque causal context to pass back on the next Put for this key.
+  bytes context = 2;
+  uint32 replicas_answered = 3;
+}
+
+message PutRequest {
+  string key = 1;
+  bytes value = 2;
+  bytes context = 3;
+  uint32 w = 4;
+}
+
+message PutResponse {
+  bytes context = 1;
+  uint32 replicas_acked = 2;
+  // Replicas that were down and whose write was handed to a stand-in node.
+  uint32 hinted = 3;
+}
+
+message DeleteRequest {
+  string key = 1;
+  bytes context = 2;
+  uint32 w = 3;
+}
+
+message DeleteResponse {
+  uint32 replicas_acked = 1;
+}
+
+message StatusRequest {}
+
+message Member {
+  string id = 1;
+  string addr = 2;
+  string state = 3;
+  uint64 incarnation = 4;
+  uint64 heartbeat = 5;
+}
+
+message StatusResponse {
+  string self = 1;
+  repeated Member members = 2;
+  repeated string ring = 3;
+  uint32 n = 4;
+  uint32 r = 5;
+  uint32 w = 6;
+  uint64 keys = 7;
+  uint64 pending_hints = 8;
+}
+
+message ReplicaGetRequest {
+  string key = 1;
+}
+
+message ReplicaGetResponse {
+  repeated Version versions = 1;
+}
+
+message ReplicaPutRequest {
+  string key = 1;
+  Version version = 2;
+  // Set when the receiver stores the write on behalf of this node.
+  string hint_for = 3;
+}
+
+message ReplicaPutResponse {}
+
+message GossipMember {
+  string id = 1;
+  string addr = 2;
+  string state = 3;
+  uint64 incarnation = 4;
+  uint64 heartbeat = 5;
+}
+
+message PingRequest {
+  string from = 1;
+  repeated GossipMember members = 2;
+}
+
+message PingResponse {
+  repeated GossipMember members = 1;
+}
+
+message PingReqRequest {
+  string from = 1;
+  string target_id = 2;
+  string target_addr = 3;
+}
+
+message PingReqResponse {
+  bool reachable = 1;
+}
+
+message TreeLevelRequest {
+  // Depth 0 is the root; each level has 2^depth hashes.
+  uint32 depth = 1;
+  // The tree only covers keys both the receiver and this peer replicate.
+  string peer = 2;
+}
+
+message TreeLevelResponse {
+  repeated bytes hashes = 1;
+}
+
+message BucketKeysRequest {
+  uint32 bucket = 1;
+  string peer = 2;
+}
+
+message BucketKeysResponse {
+  repeated string keys = 1;
+  repeated Version versions = 2;
+}
