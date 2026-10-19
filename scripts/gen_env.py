@@ -15,6 +15,11 @@ S3_ACCESS_KEY=GK{secrets.token_hex(12)}
 S3_SECRET_KEY={secrets.token_hex(32)}
 S3_BUCKET=bronze
 
+PG_SUPERUSER_PASSWORD={secrets.token_hex(12)}
+PG_ADMIN_PASSWORD={secrets.token_hex(12)}
+PG_STANDBY_PASSWORD={secrets.token_hex(12)}
+LEASE_TTL_SECONDS=20
+
 PLAN_SOURCES=seace_v3
 PLAN_FROM=2026-08
 PLAN_TO=2026-09

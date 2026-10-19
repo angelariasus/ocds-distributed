@@ -52,6 +52,25 @@ x-catalog: &catalog
     ANTI_ENTROPY_INTERVAL: ${CATALOG_ANTI_ENTROPY_INTERVAL:-30s}
     SUSPECT_TIMEOUT: ${CATALOG_SUSPECT_TIMEOUT:-10s}
 
+x-etcd: &etcd
+  image: quay.io/coreos/etcd:v3.5.17
+  restart: unless-stopped
+  profiles: [gold]
+
+# Patroni (Spilo image) manages one PostgreSQL per node and elects the primary through etcd.
+x-patroni: &patroni
+  image: ghcr.io/zalando/spilo-16:3.3-p1
+  restart: unless-stopped
+  profiles: [gold]
+  environment:
+    SCOPE: ocdsgold
+    PGVERSION: "16"
+    ETCD3_HOSTS: "'etcd1:2379','etcd2:2379','etcd3:2379'"
+    PGPASSWORD_SUPERUSER: ${PG_SUPERUSER_PASSWORD:?set in .env}
+    PGPASSWORD_ADMIN: ${PG_ADMIN_PASSWORD:?set in .env}
+    PGPASSWORD_STANDBY: ${PG_STANDBY_PASSWORD:?set in .env}
+  depends_on: [etcd1, etcd2, etcd3]
+
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
@@ -246,6 +265,107 @@ services:
       WATERMARK: ${STREAM_WATERMARK:-7 days}
     depends_on: [spark-master]
 
+  etcd1:
+    <<: *etcd
+    hostname: etcd1
+    command:
+      - etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd1:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=ocds-etcd
+    volumes:
+      - etcd1:/etcd-data
+
+  etcd2:
+    <<: *etcd
+    hostname: etcd2
+    command:
+      - etcd
+      - --name=etcd2
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd2:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd2:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=ocds-etcd
+    volumes:
+      - etcd2:/etcd-data
+
+  etcd3:
+    <<: *etcd
+    hostname: etcd3
+    command:
+      - etcd
+      - --name=etcd3
+      - --data-dir=/etcd-data
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd3:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd3:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=ocds-etcd
+    volumes:
+      - etcd3:/etcd-data
+
+  pg1:
+    <<: *patroni
+    hostname: pg1
+    volumes:
+      - pg1:/home/postgres/pgdata
+
+  pg2:
+    <<: *patroni
+    hostname: pg2
+    volumes:
+      - pg2:/home/postgres/pgdata
+
+  pg3:
+    <<: *patroni
+    hostname: pg3
+    volumes:
+      - pg3:/home/postgres/pgdata
+
+  haproxy:
+    image: haproxy:2.9-alpine
+    profiles: [gold]
+    ports: ["5000:5000", "5001:5001", "7000:7000"]
+    volumes:
+      - ./deploy/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on: [pg1, pg2, pg3]
+
+  outbox-relay:
+    image: ocds-gold
+    build: ./services/gold
+    profiles: [gold]
+    command: ["relay"]
+    environment:
+      GOLD_DSN: postgresql://postgres:${PG_SUPERUSER_PASSWORD}@haproxy:5000/postgres
+      KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
+    depends_on: [haproxy]
+
+  gold-loader:
+    image: ocds-gold
+    build: ./services/gold
+    profiles: [gold-jobs]
+    command: ["load"]
+    environment:
+      GOLD_DSN: postgresql://postgres:${PG_SUPERUSER_PASSWORD}@haproxy:5000/postgres
+      ETCD_ENDPOINTS: http://etcd1:2379,http://etcd2:2379,http://etcd3:2379
+      S3_ENDPOINT: http://garage:3900
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      LEASE_TTL_SECONDS: ${LEASE_TTL_SECONDS:-20}
+    depends_on: [haproxy]
+
   compiler:
     build: ./services/compiler
     deploy:
@@ -325,6 +445,12 @@ services:
       S3_BUCKET: ${S3_BUCKET:-bronze}
 
 volumes:
+  etcd1:
+  etcd2:
+  etcd3:
+  pg1:
+  pg2:
+  pg3:
   catalog1:
   catalog2:
   catalog3:

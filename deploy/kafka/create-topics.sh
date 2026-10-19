@@ -13,6 +13,7 @@ create extract.tasks 12
 create extract.tasks.dlq 3
 create extract.results 12
 create bronze.records 12 --config retention.ms=604800000
+create gold.events 3
 create records.compiled 12 --config cleanup.policy=compact --config min.compaction.lag.ms=60000
 
 /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" --describe
