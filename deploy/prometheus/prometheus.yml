@@ -20,6 +20,12 @@ scrape_configs:
     static_configs:
       - targets: ["ocds-mock:8080"]
 
+  - job_name: compiler
+    dns_sd_configs:
+      - names: ["compiler"]
+        type: A
+        port: 2115
+
   - job_name: catalog
     static_configs:
       - targets: ["catalog1:2114", "catalog2:2114", "catalog3:2114", "catalog4:2114", "catalog5:2114"]

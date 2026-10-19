@@ -198,6 +198,16 @@ services:
     volumes:
       - catalog5:/data
 
+  compiler:
+    build: ./services/compiler
+    deploy:
+      replicas: ${COMPILER_REPLICAS:-2}
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+    environment:
+      <<: *otel-env
+      KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
+
   limiter:
     build: ./services/limiter
     environment:
@@ -260,6 +270,7 @@ services:
       OCDS_BASE_URL: ${OCDS_BASE_URL:-https://contratacionesabiertas.oece.gob.pe/api/v1}
       LIMITER_ADDR: limiter:7000
       CATALOG_ADDRS: catalog1:7100,catalog2:7100,catalog3:7100,catalog4:7100,catalog5:7100
+      OBSERVATIONS_TOPIC: bronze.records
       S3_ENDPOINT: http://garage:3900
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
