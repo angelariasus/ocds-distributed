@@ -67,6 +67,9 @@ full corpus (30–50 GB of JSON across several machines) the parallel part would
 laptop it does not, and the honest conclusion is that this stage should run on a single executor
 until the data justifies more.
 
+On real data, 24 months of `seace_v3` (160,063 states, 183,492 items) took 78 s on two workers:
+in the same range as the amplified runs, as the fixed costs predict.
+
 ### Streaming
 
 `stream_metrics` over the same 13,250 compiled states with `WINDOW=1 hour`, `WATERMARK=30 minutes`

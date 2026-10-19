@@ -123,3 +123,28 @@ service they recover, and need the same ownership checks as a release.
 its first attempt and the retry hit the idempotent skip path, which hid the failure behind a
 "skipped" status. The emitter now parses with `use_float=True` and the worker logs every failed
 attempt at warning level.
+
+## A skip path needs to know what was done, not only what was stored
+
+Fixing the emitter was not enough: on the next backfill every file was already in Bronze with the
+current checksum, so the idempotent skip returned before parsing and not a single record reached
+`bronze.records`. "Stored" and "emitted" are two side effects, and idempotency has to track each
+one. The extractor now records emitted checksums in the catalog and re-emits stored files that
+never made it downstream. ([real-data.md](real-data.md))
+
+## Plausible totals can still be wrong by an order of magnitude
+
+On real data, EsSalud's medicine purchases summed to 12.9 billion soles of referential value,
+half of what the rest of the State spent on medicines. Nothing failed; the number just looked too
+large. The flattener, ported from the original project, copied each process's value onto every
+item, so a 40-item tender was counted 40 times. Each OCDS item carries its own `totalValue`; using
+it brought the figure to 1.7 billion. Unit tests had one item per process and could not see it.
+([real-data.md](real-data.md))
+
+## Recent data lies about durations
+
+The lead-time model learned from every signed process, and the newest months only contain the
+processes that signed fast: their median lead time was 22 days against 32–56 for older months.
+Training only on calls old enough to have finished, and testing on the newest of them rather than
+a random sample, is the difference between a model and a description of the data cutoff.
+([real-data.md](real-data.md))

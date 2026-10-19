@@ -102,6 +102,10 @@ generation, and the next request for the same key missed and recomputed.
 
 ### Model serving
 
+The figures below are from the first run, on one month and with a random split. The model has
+since been retrained on two years of real data, leaving out calls too recent to have signed (MAE
+17.9 days against 23.2 for a median baseline); see [real-data.md](real-data.md).
+
 `ml-train` fitted the lead-time model on 1,036 Gold rows with a lead time (MAE 6.1 days on the
 held-out 20%) and published `models/lead_time/20261019T055929Z.joblib`; both replicas loaded that
 version at start. Predictions through the API alternate between replicas (gRPC round robin):

@@ -14,6 +14,12 @@ The portal publishes ~2.76 million procurement records (2004–2026, two source 
 monthly bulk files plus a cursor-paginated API. See [docs/ocds-api.md](docs/ocds-api.md) for what
 was measured and how it shapes the design.
 
+The platform is designed for the whole corpus and has been validated end to end on two years of
+real data: 24 monthly files (October 2024 to September 2026, 160,063 records, 183,492 tender
+items) from download to the EsSalud medicine analysis. Crawling, load and chaos experiments ran
+against a simulated portal, never the real one. Scope, findings and limits are in
+[docs/real-data.md](docs/real-data.md).
+
 ## Status: all nine phases complete
 
 ```
@@ -51,7 +57,7 @@ Two task kinds flow through `extract.tasks`:
 | `services/catalog` | Dynamo-style key-value store holding crawl checkpoints: consistent-hashing ring, N/R/W quorums, vector clocks with client-side conflict resolution, hinted handoff, read repair, SWIM-style gossip membership, Merkle anti-entropy, write-ahead log | Partitioning, replication, tunable consistency, failure detection, eventual consistency, reconciliation |
 | `services/compiler` | Merges every sighting of an OCID (bulk files, API pages, redeliveries, any order) into one record modelled as a state-based CRDT, stamped with Lamport time; state lives in a compacted Kafka topic that doubles as changelog for restoration after rebalances | CRDTs, logical clocks, convergence, co-partitioning, state restoration, idempotency under at-least-once |
 | `services/silver` | PySpark jobs on a standalone Spark cluster: batch flattening of compiled records to one row per tender item (Parquet by fiscal year) and a Structured Streaming query with event-time windows and watermarks | Data-parallel processing, shuffles, horizontal speed-up, stream processing, event time vs. arrival time, late data, exactly-once sinks |
-| `services/gold` | Loads the star schema into a Patroni-managed PostgreSQL cluster as a saga: lease with fencing token in etcd, staging, one-transaction swap with a transactional outbox relayed to Kafka | Leader election and automatic failover, consensus (etcd/Raft), distributed mutual exclusion, fencing, sagas, outbox instead of 2PC |
+| `services/gold` | Classifies medicines against EsSalud's Petitorio and loads the star schema into a Patroni-managed PostgreSQL cluster as a saga: lease with fencing token in etcd, staging, one-transaction swap with a transactional outbox relayed to Kafka | Leader election and automatic failover, consensus (etcd/Raft), distributed mutual exclusion, fencing, sagas, outbox instead of 2PC |
 | `services/api` | Query service over Gold, gRPC and REST from one implementation, behind Envoy (DNS discovery, least-request, retries, outlier ejection); reads from PostgreSQL replicas; cache-aside on a Redis Cluster invalidated by `gold.events` | RPC, service discovery, load balancing, caching, read scaling, timeouts and retries |
 | `services/ml` | Lead-time model trained from Gold, published as a versioned artifact to the object store and served by gRPC replicas balanced client-side by the API | Model serving, immutable artifacts, client-side load balancing, deadlines |
 | `services/ledger` | Append-only transparency log (RFC 6962 Merkle tree, Ed25519-signed tree heads, inclusion and consistency proofs) attesting every Bronze object and Gold load from Kafka; `ledger audit` is an independent auditor | Integrity, tamper evidence, signed state, distributed trust through auditors |
@@ -94,7 +100,7 @@ Plan window and worker count live in `.env` (`PLAN_SOURCES`, `PLAN_FROM`, `PLAN_
 The portal is a public government service: keep the plan window small during development and
 never run load or chaos experiments against it. Use the simulation profile instead, see
 [docs/simulation.md](docs/simulation.md). The catalog's design and its live experiments are in
-[docs/catalog.md](docs/catalog.md); the record compiler's in [docs/compiler.md](docs/compiler.md); Silver's in [docs/silver.md](docs/silver.md); Gold's in [docs/gold.md](docs/gold.md); the serving layer's in [docs/serving.md](docs/serving.md); security in [docs/security.md](docs/security.md); consensus in [docs/consensus.md](docs/consensus.md); chaos, CAP and benchmarks in [docs/chaos.md](docs/chaos.md). What the live runs taught, and what it changed, is in
+[docs/catalog.md](docs/catalog.md); the record compiler's in [docs/compiler.md](docs/compiler.md); Silver's in [docs/silver.md](docs/silver.md); Gold's in [docs/gold.md](docs/gold.md); the serving layer's in [docs/serving.md](docs/serving.md); security in [docs/security.md](docs/security.md); consensus in [docs/consensus.md](docs/consensus.md); chaos, CAP and benchmarks in [docs/chaos.md](docs/chaos.md); the real-data run and the EsSalud medicine analysis in [docs/real-data.md](docs/real-data.md). What the live runs taught, and what it changed, is in
 [docs/lessons.md](docs/lessons.md).
 
 ## Development

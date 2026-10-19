@@ -69,11 +69,12 @@ lock service.
 | `gold.dim_tiempo` | one day | `sk = yyyymmdd` |
 | `gold.dim_entidad_compradora` | one buyer (RUC) | `es_essalud` flag |
 | `gold.dim_proveedor` | one supplier (RUC) | natural / legal person / consortium |
-| `gold.dim_item` | classification + normalised description | the fuzzy match against the Petitorio is left to the analysis layer |
+| `gold.dim_item` | classification + normalised description | `es_medicamento` (CUBSO segment 51) and the Petitorio match with its method and score, see [real-data.md](real-data.md) |
 | `gold.dim_tipo_proceso` | procurement method + details | |
 
 Derived measures follow the original project: `ratio_sobrecosto_pct` (amendments over contracted
-amount) and `lead_time_dias` (call to signature).
+amount) and `lead_time_dias` (call to signature). The view `gold.v_essalud_medicamentos` joins
+EsSalud's medicine items with their Petitorio status for `analysis/essalud_medicines.sql`.
 
 ## Live experiments
 
