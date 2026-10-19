@@ -24,9 +24,9 @@ def carrier_to_headers(carrier: dict[str, str]) -> list[tuple[str, bytes]]:
 
 
 class Worker:
-    def __init__(self, settings: Settings, extractor: Extractor):
+    def __init__(self, settings: Settings):
         self.settings = settings
-        self.extractor = extractor
+        self.extractor: Extractor | None = None
         self.running = True
         self.consumer = Consumer(
             {
@@ -50,7 +50,8 @@ class Worker:
     def stop(self, *_):
         self.running = False
 
-    def run(self) -> None:
+    def run(self, extractor: Extractor) -> None:
+        self.extractor = extractor
         signal.signal(signal.SIGTERM, self.stop)
         signal.signal(signal.SIGINT, self.stop)
         self.consumer.subscribe(

@@ -11,6 +11,7 @@ from prometheus_client import Counter
 from . import limiter as lim
 from .breaker import CircuitBreaker
 from .catalog import Catalog
+from .events import Emitter
 from .models import Task
 
 log = logging.getLogger(__name__)
@@ -63,6 +64,7 @@ class RangeCrawler:
         max_backoff_seconds: float = 8.0,
         sleep: Callable[[float], None] = time.sleep,
         catalog: Catalog | None = None,
+        emitter: Emitter | None = None,
     ):
         self.source = source
         self.store = store
@@ -75,6 +77,7 @@ class RangeCrawler:
         self.max_backoff_seconds = max_backoff_seconds
         self.sleep = sleep
         self.catalog = catalog
+        self.emitter = emitter
 
     def crawl(self, task: Task) -> tuple[int, int]:
         prefix = task.prefix or ""
@@ -162,3 +165,5 @@ class RangeCrawler:
             "application/json",
         )
         RECORDS.inc(len(batch))
+        if self.emitter:
+            self.emitter.emit_page(batch, task.source, key)

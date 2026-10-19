@@ -25,6 +25,7 @@ class Settings:
     breaker_failures: int
     breaker_recovery_seconds: float
     catalog_addrs: list[str]
+    observations_topic: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -50,4 +51,5 @@ class Settings:
             breaker_failures=int(env("BREAKER_FAILURES", "3")),
             breaker_recovery_seconds=float(env("BREAKER_RECOVERY_SECONDS", "30")),
             catalog_addrs=[a.strip() for a in env("CATALOG_ADDRS", "").split(",") if a.strip()],
+            observations_topic=env("OBSERVATIONS_TOPIC", "bronze.records"),
         )

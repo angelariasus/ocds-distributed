@@ -6,6 +6,7 @@ dependencies = [
     "boto3>=1.35",
     "confluent-kafka>=2.6",
     "grpcio>=1.70",
+    "ijson>=3.3",
     "protobuf>=5.29",
     "opentelemetry-exporter-otlp-proto-http>=1.28",
     "opentelemetry-sdk>=1.28",

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from .events import Emitter
 from .integrity import IntegrityError, inner_json_sha256
 from .models import RECORDS_RANGE, Result, Task
 
@@ -43,10 +44,12 @@ class Extractor:
         backoff_seconds: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
         crawler: Crawler | None = None,
+        emitter: Emitter | None = None,
     ):
         self.source = source
         self.store = store
         self.crawler = crawler
+        self.emitter = emitter
         self.worker_id = worker_id
         self.max_attempts = max_attempts
         self.backoff_seconds = backoff_seconds
@@ -90,7 +93,8 @@ class Extractor:
                     "published-at": task.published_at,
                 },
             )
-        return self._result(task, "stored", expected, size, attempt)
+            records = self.emitter.emit_archive(archive, task.source, task.task_id) if self.emitter else 0
+        return self._result(task, "stored", expected, size, attempt, records=records)
 
     def _result(self, task: Task, status: str, sha: str, size: int, attempts: int, **counts: int) -> Result:
         prefix_dir = f"ocds/api/source={task.source}/prefix={task.prefix}/"
