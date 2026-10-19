@@ -18,7 +18,7 @@ log = logging.getLogger("silver.stream_metrics")
 
 
 class ProgressLogger(StreamingQueryListener):
-    """Logs what the course cares about: input rows, the watermark and how far event time got."""
+    """Logs the stream's progress: input rows, the watermark and how far event time got."""
 
     def onQueryStarted(self, event):
         log.info("query started id=%s", event.id)

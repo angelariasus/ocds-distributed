@@ -2,7 +2,7 @@
 
 The last mile replaces the original project's Power BI with services that any client can call:
 a query API over the Gold warehouse, a model-serving service, and a Grafana dashboard. This layer is
-where the course's client-server topics live: RPC, service discovery, load balancing, caching and
+where the client-server concerns live: RPC, service discovery, load balancing, caching and
 timeouts.
 
 ```

@@ -33,9 +33,9 @@ A Structured Streaming query over the same topic computes per-buyer, per-categor
 - **Watermark** (`WATERMARK`, default 7 days) bounds how long a window stays open for late records.
   Once the watermark passes a window's end, the window is finalised and appended to the Parquet
   sink; records that arrive with an event time older than the watermark are dropped. The listener
-  logs the watermark and the maximum event time after every micro-batch, which is what the
-  course's discussion of time in distributed systems needs: a physical clock (arrival) versus a
-  logical notion of progress (watermark) derived from the data itself.
+  logs the watermark and the maximum event time after every micro-batch, which shows the
+  difference between a physical clock (arrival) and a logical notion of progress (watermark)
+  derived from the data itself.
 - **Exactly-once sink**: the Parquet sink with a checkpoint location on S3A records which batches
   were committed, so restarting the job after a crash does not duplicate windows.
 
@@ -97,7 +97,7 @@ touched each record), most of the historical records arrive *after* the watermar
 their hour and are dropped as late, roughly three out of four rows per micro-batch, while 629
 hourly windows stayed open in state and the finalised ones were appended to
 `silver/metrics/daily_buyer/` (18 Parquet files). A record injected with an event time of
-2026-06-01 was dropped the same way. The number that matters for the course is the dropped count:
+2026-06-01 was dropped the same way. The number that matters is the dropped count:
 a watermark is a promise about how late data may be, and the 7-day default exists because the
 portal's own publication lag is measured in days, not minutes. Choosing it too tight does not make
 the pipeline faster, it makes it silently incomplete.
