@@ -20,6 +20,10 @@ scrape_configs:
     static_configs:
       - targets: ["ocds-mock:8080"]
 
+  - job_name: catalog
+    static_configs:
+      - targets: ["catalog1:2114", "catalog2:2114", "catalog3:2114", "catalog4:2114", "catalog5:2114"]
+
   - job_name: garage
     static_configs:
       - targets: ["garage1:3903", "garage2:3903", "garage3:3903", "garage4:3903"]

@@ -35,6 +35,21 @@ x-garage: &garage
     default:
       aliases: [garage]
 
+x-catalog: &catalog
+  image: ocds-catalog
+  build: ./services/catalog
+  restart: unless-stopped
+  environment:
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    DATA_DIR: /data
+    SEEDS: catalog1=catalog1:7100,catalog2=catalog2:7100,catalog3=catalog3:7100
+    REPLICATION_N: ${CATALOG_N:-3}
+    READ_QUORUM_R: ${CATALOG_R:-2}
+    WRITE_QUORUM_W: ${CATALOG_W:-2}
+    ANTI_ENTROPY_INTERVAL: ${CATALOG_ANTI_ENTROPY_INTERVAL:-30s}
+    SUSPECT_TIMEOUT: ${CATALOG_SUSPECT_TIMEOUT:-10s}
+
 x-otel-env: &otel-env
   OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
   OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
@@ -153,6 +168,36 @@ services:
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
 
+  catalog1:
+    <<: *catalog
+    hostname: catalog1
+    volumes:
+      - catalog1:/data
+
+  catalog2:
+    <<: *catalog
+    hostname: catalog2
+    volumes:
+      - catalog2:/data
+
+  catalog3:
+    <<: *catalog
+    hostname: catalog3
+    volumes:
+      - catalog3:/data
+
+  catalog4:
+    <<: *catalog
+    hostname: catalog4
+    volumes:
+      - catalog4:/data
+
+  catalog5:
+    <<: *catalog
+    hostname: catalog5
+    volumes:
+      - catalog5:/data
+
   limiter:
     build: ./services/limiter
     environment:
@@ -208,17 +253,24 @@ services:
       kafka-init: { condition: service_completed_successfully }
       garage-init: { condition: service_completed_successfully }
       limiter: { condition: service_started }
+      catalog1: { condition: service_started }
     environment:
       <<: *otel-env
       KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
       OCDS_BASE_URL: ${OCDS_BASE_URL:-https://contratacionesabiertas.oece.gob.pe/api/v1}
       LIMITER_ADDR: limiter:7000
+      CATALOG_ADDRS: catalog1:7100,catalog2:7100,catalog3:7100,catalog4:7100,catalog5:7100
       S3_ENDPOINT: http://garage:3900
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:-bronze}
 
 volumes:
+  catalog1:
+  catalog2:
+  catalog3:
+  catalog4:
+  catalog5:
   kafka1:
   kafka2:
   kafka3:
