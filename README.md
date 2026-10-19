@@ -1,10 +1,5 @@
 # Distributed Event-Driven Data Platform for Peru's Open Contracting Data
 
-> A distributed data engineering platform for Peru's Open Contracting Portal (OCDS standard),
-> built on an event-driven architecture with coordinated, fault-tolerant extraction, adaptive
-> load control, replicated storage and parallel processing, applied to evaluating the efficiency
-> of EsSalud's medicine procurement.
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/angelariasus/ocds-distributed/actions/workflows/ci.yml/badge.svg)](https://github.com/angelariasus/ocds-distributed/actions/workflows/ci.yml)
 
