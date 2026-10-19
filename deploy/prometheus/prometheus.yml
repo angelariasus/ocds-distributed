@@ -12,6 +12,14 @@ scrape_configs:
         type: A
         port: 8000
 
+  - job_name: limiter
+    static_configs:
+      - targets: ["limiter:2113"]
+
+  - job_name: ocds-mock
+    static_configs:
+      - targets: ["ocds-mock:8080"]
+
   - job_name: garage
     static_configs:
       - targets: ["garage1:3903", "garage2:3903", "garage3:3903", "garage4:3903"]
