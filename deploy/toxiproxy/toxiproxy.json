@@ -1,0 +1,8 @@
+[
+  {
+    "name": "ocds",
+    "listen": "0.0.0.0:8081",
+    "upstream": "ocds-mock:8080",
+    "enabled": true
+  }
+]
