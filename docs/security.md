@@ -4,7 +4,7 @@ Phase 8 answers four questions for a system whose parts talk over a network they
 who is on the other end of a connection, can anyone read or change what travels on it, what is
 each caller allowed to do, and how would anyone notice if stored history were altered.
 
-![Security architecture: an internal CA issues service identities, Envoy verifies tokens, services talk over mutual TLS, and a Merkle ledger is checked by an independent auditor](assets/security.png)
+![Security architecture: an internal CA issues service identities, Envoy verifies tokens, services talk over mutual TLS, and a Merkle ledger is checked by an independent auditor](/docs/assets/security.png)
 
 Envoy verifies the token's signature, issuer, audience and expiry against the published key set, the
 API authorizes by role, and every internal hop is mutually authenticated. The catalog nodes also
