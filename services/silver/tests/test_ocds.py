@@ -116,3 +116,21 @@ def test_records_without_items_produce_no_rows(spark):
     body["tender"]["items"] = []
     states = ocds.latest_states(kafka_frame(spark, [state_row("ocds-1", 1, body)]))
     assert ocds.flatten(states).count() == 0
+
+
+def test_amounts_are_per_item_not_per_process(spark):
+    # One call with two items and one award covering both: values must split, not repeat.
+    body = compiled()
+    body["tender"]["value"] = {"amount": 3000.0}
+    body["tender"]["items"][0]["totalValue"] = {"amount": 1000.0}
+    body["tender"]["items"][1]["totalValue"] = {"amount": 2000.0}
+    body["awards"][0]["value"] = {"amount": 2700.0}
+    body["awards"][0]["items"] = [{"id": "1", "totalValue": {"amount": 900.0}}, {"id": "2", "totalValue": {"amount": 1800.0}}]
+    body["contracts"] = []
+    states = ocds.latest_states(kafka_frame(spark, [state_row("ocds-1", 1, body)]))
+    rows = {r["n_item"]: r for r in ocds.flatten(states).collect()}
+
+    assert rows["1"]["monto_referencial"] == 1000.0 and rows["2"]["monto_referencial"] == 2000.0
+    assert rows["1"]["monto_adjudicado"] == 900.0 and rows["2"]["monto_adjudicado"] == 1800.0
+    assert sum(r["monto_referencial"] for r in rows.values()) == 3000.0
+    assert rows["1"]["monto_referencial_proceso"] == 3000.0

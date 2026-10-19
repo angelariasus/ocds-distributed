@@ -11,12 +11,15 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import ArrayType, DoubleType, LongType, StringType, StructField, StructType
 
 _VALUE = StructType([StructField("amount", DoubleType())])
-_ID_ONLY = StructType([StructField("id", StringType())])
+_VALUE_ONLY = StructType([StructField("amount", DoubleType())])
+# Awards and contracts list the items they cover, each with its own value.
+_ID_ONLY = StructType([StructField("id", StringType()), StructField("totalValue", _VALUE_ONLY)])
 _ITEM = StructType(
     [
         StructField("id", StringType()),
         StructField("description", StringType()),
         StructField("quantity", DoubleType()),
+        StructField("totalValue", _VALUE_ONLY),
         StructField("unit", StructType([StructField("name", StringType())])),
         StructField("classification", StructType([StructField("id", StringType()), StructField("description", StringType())])),
     ]
@@ -113,6 +116,12 @@ def latest_states(kafka_df: DataFrame) -> DataFrame:
     )
 
 
+def _item_value(parent):
+    """This item's share of an award or contract: its own line, or the whole value if it is the only item."""
+    line = F.try_element_at(F.filter(parent["items"], lambda i: i["id"] == F.col("_item_id")), F.lit(1))
+    return F.coalesce(line["totalValue"]["amount"], F.when(F.size(parent["items"]) == 1, parent["value"]["amount"]))
+
+
 def _clean_ruc(col):
     cleaned = F.regexp_extract(col, r"(\d+)$", 1)
     return F.when(col.isNull(), F.lit(None)).when(cleaned == "", col).otherwise(cleaned)
@@ -189,9 +198,14 @@ def flatten(df: DataFrame) -> DataFrame:
         fecha_convocatoria.alias("fecha_convocatoria"),
         _to_date(F.col("_award")["date"]).alias("fecha_buena_pro"),
         _to_date(F.col("_contract")["dateSigned"]).alias("fecha_suscripcion"),
-        tender["value"]["amount"].alias("monto_referencial"),
-        F.col("_award")["value"]["amount"].alias("monto_adjudicado"),
-        F.col("_contract")["value"]["amount"].alias("monto_contratado"),
+        # Item-level values: tender, award and contract values cover every item of the process,
+        # so copying them onto each item multiplies them when summing across items.
+        F.coalesce(F.col("item")["totalValue"]["amount"], F.when(F.size(tender["items"]) == 1, tender["value"]["amount"])).alias(
+            "monto_referencial"
+        ),
+        _item_value(F.col("_award")).alias("monto_adjudicado"),
+        _item_value(F.col("_contract")).alias("monto_contratado"),
+        tender["value"]["amount"].alias("monto_referencial_proceso"),
         monto_adicional.alias("monto_adicional"),
         F.coalesce(peruc, _clean_ruc(F.col("_buyer")["id"])).alias("ruc_comprador"),
         F.col("_buyer")["name"].alias("nombre_comprador"),
