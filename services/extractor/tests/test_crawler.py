@@ -4,6 +4,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from extractor.breaker import OPEN, CircuitBreaker
+from extractor.catalog import Entry
 from extractor.crawler import RangeCrawler, ThrottledError
 from extractor.limiter import RateLimiter
 from extractor.models import RECORDS_RANGE, Task
@@ -11,6 +12,7 @@ from limiter.v1 import limiter_pb2
 
 BASE = "http://mock/api/v1"
 TASK = Task(task_id="api-seace_v3-12", source="seace_v3", planned_at="t", kind=RECORDS_RANGE, prefix="12")
+CHECKPOINT = "crawl/api-seace_v3-12/t"
 
 
 def record(source, tid):
@@ -63,6 +65,21 @@ class FakeStub:
     def Report(self, request, timeout=None):
         self.outcomes.append(request.outcome)
         return limiter_pb2.ReportResponse()
+
+
+class FakeCatalog:
+    def __init__(self, existing=None):
+        self.entries = dict(existing or {})
+        self.puts = []
+
+    def get(self, key):
+        return self.entries.get(key)
+
+    def put(self, key, value, context=b""):
+        self.puts.append((key, value, context))
+        ctx = context + b"+"
+        self.entries[key] = Entry(value=value, context=ctx)
+        return ctx
 
 
 def make(portal, **kw):
@@ -135,3 +152,43 @@ def test_connection_failures_trip_breaker_without_feeding_limiter():
     assert records == 1
     assert transitions[:2] == ["open", "half_open"]
     assert stub.outcomes == [limiter_pb2.OUTCOME_OK]
+
+
+def test_checkpoints_every_page_and_marks_completion():
+    portal = FakePortal({"seace_v3": ["120005", "120004", "120003", "120002", "120001"]})
+    catalog = FakeCatalog()
+    crawler, _, _, _ = make(portal, catalog=catalog)
+
+    crawler.crawl(TASK)
+
+    assert {key for key, _, _ in catalog.puts} == {CHECKPOINT}
+    states = [value for _, value, _ in catalog.puts]
+    assert [s["pages"] for s in states] == [1, 2, 3]
+    assert states[-1]["done"] is True and states[-1]["next"] is None
+    # Each put carries the context returned by the previous one: causally chained writes.
+    assert [ctx for _, _, ctx in catalog.puts] == [b"", b"+", b"++"]
+
+
+def test_resumes_from_checkpoint_after_redelivery():
+    portal = FakePortal({"seace_v3": ["120005", "120004", "120003", "120002", "120001"]})
+    resume_url = f"{BASE}/recordsAfter?size=2&searchAfter=seace_v3,120004,0,0,x"
+    catalog = FakeCatalog({CHECKPOINT: Entry(value={"next": resume_url, "pages": 1, "records": 2}, context=b"c1")})
+    crawler, store, _, _ = make(portal, catalog=catalog)
+
+    pages, records = crawler.crawl(TASK)
+
+    assert (pages, records) == (3, 5)
+    assert sorted(store.objects) == [
+        "ocds/api/source=seace_v3/prefix=12/120001.json",
+        "ocds/api/source=seace_v3/prefix=12/120003.json",
+    ]
+    assert catalog.puts[0][2] == b"c1"
+
+
+def test_completed_checkpoint_skips_the_crawl():
+    portal = FakePortal({"seace_v3": ["120001"]})
+    done = Entry(value={"next": None, "pages": 4, "records": 7, "done": True}, context=b"c")
+    crawler, _, _, _ = make(portal, catalog=FakeCatalog({CHECKPOINT: done}))
+
+    assert crawler.crawl(TASK) == (4, 7)
+    assert portal.calls == 0

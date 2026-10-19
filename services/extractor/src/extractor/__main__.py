@@ -2,6 +2,7 @@ import logging
 
 from . import telemetry
 from .breaker import CircuitBreaker
+from .catalog import Catalog
 from .config import Settings
 from .crawler import RangeCrawler
 from .extractor import Extractor
@@ -24,6 +25,7 @@ def main() -> None:
         CircuitBreaker("ocds-portal", settings.breaker_failures, settings.breaker_recovery_seconds),
         settings.ocds_base_url,
         page_size=settings.page_size,
+        catalog=Catalog(settings.catalog_addrs) if settings.catalog_addrs else None,
     )
     extractor = Extractor(
         http,

@@ -10,12 +10,14 @@ from prometheus_client import Counter
 
 from . import limiter as lim
 from .breaker import CircuitBreaker
+from .catalog import Catalog
 from .models import Task
 
 log = logging.getLogger(__name__)
 
 PAGES = Counter("extractor_pages_total", "recordsAfter pages fetched by outcome.", ["outcome"])
 RECORDS = Counter("extractor_records_total", "OCDS records stored from the cursor API.")
+RESUMED = Counter("extractor_crawls_resumed_total", "Crawls resumed from a catalog checkpoint.")
 
 
 class ThrottledError(Exception):
@@ -60,6 +62,7 @@ class RangeCrawler:
         backoff_seconds: float = 1.0,
         max_backoff_seconds: float = 8.0,
         sleep: Callable[[float], None] = time.sleep,
+        catalog: Catalog | None = None,
     ):
         self.source = source
         self.store = store
@@ -71,6 +74,7 @@ class RangeCrawler:
         self.backoff_seconds = backoff_seconds
         self.max_backoff_seconds = max_backoff_seconds
         self.sleep = sleep
+        self.catalog = catalog
 
     def crawl(self, task: Task) -> tuple[int, int]:
         prefix = task.prefix or ""
@@ -78,6 +82,20 @@ class RangeCrawler:
         start = {"size": self.page_size, "searchAfter": f"{task.source},{prefix}z,0,0,x"}
         url: str | None = f"{self.base_url}/recordsAfter?{urlencode(start)}"
         pages = records = 0
+        context = b""
+        # Scoped to the planning round: a redelivered message resumes, a new round re-crawls.
+        checkpoint_key = f"crawl/{task.task_id}/{task.planned_at}"
+        if self.catalog and (entry := self.catalog.get(checkpoint_key)):
+            if entry.value.get("done"):
+                return entry.value["pages"], entry.value["records"]
+            url, pages, records, context = (
+                entry.value["next"],
+                entry.value["pages"],
+                entry.value["records"],
+                entry.context,
+            )
+            RESUMED.inc()
+        log.info("task %s crawl starting at page %d", task.task_id, pages + 1)
         while url:
             page = self.fetch_page(url)
             batch = [r for r in page.get("records", []) if belongs(r, task)]
@@ -86,9 +104,18 @@ class RangeCrawler:
                 pages += 1
                 records += len(batch)
             if len(batch) < len(page.get("records", [])) or not batch:
-                break
-            url = page.get("links", {}).get("next")
+                url = None
+            else:
+                url = page.get("links", {}).get("next")
+            context = self.checkpoint(checkpoint_key, url, pages, records, context)
         return pages, records
+
+    def checkpoint(self, key: str, next_url: str | None, pages: int, records: int, context: bytes) -> bytes:
+        if not self.catalog:
+            return context
+        state = {"next": next_url, "pages": pages, "records": records, "done": next_url is None}
+        # Written after the page is durably stored, so a crash loses at most one page of work.
+        return self.catalog.put(key, state, context) or context
 
     def fetch_page(self, url: str) -> dict:
         for attempt in range(1, self.max_page_attempts + 1):
