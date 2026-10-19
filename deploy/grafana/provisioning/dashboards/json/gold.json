@@ -1,0 +1,61 @@
+{
+  "title": "Gold: compras públicas",
+  "uid": "ocds-gold",
+  "schemaVersion": 39,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat", "title": "Ítems en Gold", "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "gold" },
+      "targets": [{ "rawSql": "SELECT count(*) AS items FROM gold.fact_items", "format": "table", "refId": "A" }]
+    },
+    {
+      "type": "stat", "title": "Compradores", "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "gold" },
+      "targets": [{ "rawSql": "SELECT count(*) FROM gold.dim_entidad_compradora", "format": "table", "refId": "A" }]
+    },
+    {
+      "type": "stat", "title": "Proveedores", "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "gold" },
+      "targets": [{ "rawSql": "SELECT count(*) FROM gold.dim_proveedor", "format": "table", "refId": "A" }]
+    },
+    {
+      "type": "stat", "title": "Última carga (token)", "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "gold" },
+      "targets": [{ "rawSql": "SELECT max(token) FROM gold.loads WHERE status = 'committed'", "format": "table", "refId": "A" }]
+    },
+    {
+      "type": "stat", "title": "Cache hit ratio (API, 5m)", "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" } },
+      "targets": [{ "expr": "sum(rate(api_cache_total{outcome=\"hit\"}[5m])) / sum(rate(api_cache_total[5m]))", "refId": "A" }]
+    },
+    {
+      "type": "stat", "title": "API p99 (5m)", "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [{ "expr": "histogram_quantile(0.99, sum(rate(api_request_seconds_bucket[5m])) by (le))", "refId": "A" }]
+    },
+    {
+      "type": "table", "title": "Top compradores por monto referencial (MM S/)", "gridPos": { "x": 0, "y": 4, "w": 12, "h": 10 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "gold" },
+      "targets": [{ "rawSql": "SELECT e.nombre AS comprador, count(*) AS items, round(sum(f.monto_referencial)::numeric/1e6, 1) AS mm_soles FROM gold.fact_items f JOIN gold.dim_entidad_compradora e ON e.sk_entidad = f.fk_entidad GROUP BY 1 ORDER BY 3 DESC NULLS LAST LIMIT 15", "format": "table", "refId": "A" }]
+    },
+    {
+      "type": "table", "title": "EsSalud: ítems por método de contratación", "gridPos": { "x": 12, "y": 4, "w": 12, "h": 10 },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "gold" },
+      "targets": [{ "rawSql": "SELECT t.detalles AS metodo, count(*) AS items, round(avg(f.lead_time_dias)) AS lead_time_dias, sum(CASE WHEN f.flag_tiene_adenda THEN 1 ELSE 0 END) AS con_adenda FROM gold.fact_items f JOIN gold.dim_entidad_compradora e ON e.sk_entidad = f.fk_entidad JOIN gold.dim_tipo_proceso t ON t.sk_tipo_proceso = f.fk_tipo_proceso WHERE e.es_essalud GROUP BY 1 ORDER BY 2 DESC", "format": "table", "refId": "A" }]
+    },
+    {
+      "type": "timeseries", "title": "API: peticiones/s por réplica", "gridPos": { "x": 0, "y": 14, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(rate(api_requests_total[1m])) by (instance)", "legendFormat": "{{instance}}", "refId": "A" }]
+    },
+    {
+      "type": "timeseries", "title": "ML: predicciones/s por réplica", "gridPos": { "x": 12, "y": 14, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(rate(ml_predictions_total[1m])) by (instance)", "legendFormat": "{{instance}}", "refId": "A" }]
+    }
+  ]
+}

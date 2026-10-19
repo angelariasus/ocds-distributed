@@ -1,0 +1,106 @@
+static_resources:
+  listeners:
+    # REST/JSON for browsers and curl.
+    - name: rest
+      address: { socket_address: { address: 0.0.0.0, port_value: 8090 } }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: rest
+                codec_type: AUTO
+                route_config:
+                  name: rest
+                  virtual_hosts:
+                    - name: api
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: api_rest
+                            timeout: 5s
+                            retry_policy:
+                              retry_on: "5xx,reset,connect-failure"
+                              num_retries: 2
+                              per_try_timeout: 2s
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+    # gRPC for other services and the CLI.
+    - name: grpc
+      address: { socket_address: { address: 0.0.0.0, port_value: 8091 } }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: grpc
+                codec_type: HTTP2
+                route_config:
+                  name: grpc
+                  virtual_hosts:
+                    - name: api
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: api_grpc
+                            timeout: 5s
+                            retry_policy:
+                              retry_on: "unavailable,reset,connect-failure"
+                              num_retries: 2
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    # Replicas are discovered through compose DNS (one A record per container) and
+    # re-resolved every few seconds, so scaling the service changes the pool live.
+    - name: api_rest
+      type: STRICT_DNS
+      dns_refresh_rate: 5s
+      lb_policy: LEAST_REQUEST
+      connect_timeout: 1s
+      load_assignment:
+        cluster_name: api_rest
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: api, port_value: 8000 } } }
+      # Passive health checking: a replica that keeps failing is ejected for a while.
+      outlier_detection:
+        consecutive_5xx: 3
+        consecutive_gateway_failure: 3
+        interval: 5s
+        base_ejection_time: 30s
+        max_ejection_percent: 67
+      circuit_breakers:
+        thresholds:
+          - max_connections: 512
+            max_pending_requests: 256
+            max_requests: 512
+    - name: api_grpc
+      type: STRICT_DNS
+      dns_refresh_rate: 5s
+      lb_policy: ROUND_ROBIN
+      connect_timeout: 1s
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: api_grpc
+        endpoints:
+          - lb_endpoints:
+              - endpoint: { address: { socket_address: { address: api, port_value: 9000 } } }
+      outlier_detection:
+        consecutive_gateway_failure: 3
+        interval: 5s
+        base_ejection_time: 30s
+        max_ejection_percent: 67
+
+admin:
+  address: { socket_address: { address: 0.0.0.0, port_value: 9901 } }

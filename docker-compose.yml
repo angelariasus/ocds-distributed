@@ -186,6 +186,7 @@ services:
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      PG_SUPERUSER_PASSWORD: ${PG_SUPERUSER_PASSWORD:-}
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
 
@@ -365,6 +366,102 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       LEASE_TTL_SECONDS: ${LEASE_TTL_SECONDS:-20}
     depends_on: [haproxy]
+
+  redis1:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    profiles: [serve]
+    hostname: redis1
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "no", "--save", ""]
+
+  redis2:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    profiles: [serve]
+    hostname: redis2
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "no", "--save", ""]
+
+  redis3:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    profiles: [serve]
+    hostname: redis3
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "no", "--save", ""]
+
+  redis4:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    profiles: [serve]
+    hostname: redis4
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "no", "--save", ""]
+
+  redis5:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    profiles: [serve]
+    hostname: redis5
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "no", "--save", ""]
+
+  redis6:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    profiles: [serve]
+    hostname: redis6
+    command: ["redis-server", "--cluster-enabled", "yes", "--cluster-node-timeout", "5000", "--appendonly", "no", "--save", ""]
+
+  redis-init:
+    image: redis:7.4-alpine
+    profiles: [serve]
+    entrypoint: ["/bin/sh", "/init/init.sh"]
+    volumes:
+      - ./deploy/redis/init.sh:/init/init.sh:ro
+    depends_on: [redis1, redis2, redis3, redis4, redis5, redis6]
+
+  ml:
+    image: ocds-ml
+    build: ./services/ml
+    profiles: [serve]
+    deploy:
+      replicas: ${ML_REPLICAS:-2}
+    command: ["serve"]
+    environment:
+      S3_ENDPOINT: http://garage:3900
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+
+  ml-train:
+    image: ocds-ml
+    build: ./services/ml
+    profiles: [serve-jobs]
+    command: ["train"]
+    environment:
+      GOLD_DSN: postgresql://postgres:${PG_SUPERUSER_PASSWORD}@haproxy:5001/postgres
+      S3_ENDPOINT: http://garage:3900
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+
+  api:
+    build: ./services/api
+    profiles: [serve]
+    deploy:
+      replicas: ${API_REPLICAS:-3}
+    environment:
+      <<: *otel-env
+      GOLD_DSN: postgresql://postgres:${PG_SUPERUSER_PASSWORD}@haproxy:5001/postgres
+      REDIS_ADDRS: redis1:6379,redis2:6379,redis3:6379,redis4:6379,redis5:6379,redis6:6379
+      ML_TARGET: dns:///ml:9000
+      KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
+      CACHE_TTL: ${CACHE_TTL:-5m}
+    depends_on:
+      redis-init: { condition: service_completed_successfully }
+
+  envoy:
+    image: envoyproxy/envoy:v1.32.1
+    profiles: [serve]
+    ports: ["8090:8090", "8091:8091", "9901:9901"]
+    volumes:
+      - ./deploy/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    depends_on: [api]
 
   compiler:
     build: ./services/compiler

@@ -11,3 +11,15 @@ datasources:
     uid: jaeger
     type: jaeger
     url: http://jaeger:16686
+
+  - name: Gold (PostgreSQL replicas)
+    uid: gold
+    type: grafana-postgresql-datasource
+    url: haproxy:5001
+    user: postgres
+    secureJsonData:
+      password: $PG_SUPERUSER_PASSWORD
+    jsonData:
+      database: postgres
+      sslmode: require
+      postgresVersion: 1600
