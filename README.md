@@ -9,19 +9,31 @@ The portal publishes ~2.76 million procurement records (2004–2026, two source 
 monthly bulk files plus a cursor-paginated API. See [docs/ocds-api.md](docs/ocds-api.md) for what
 was measured and how it shapes the design.
 
-## Status: phase 1 — distributed extraction
+## Status: phase 2 — adaptive rate limiting and fault isolation
 
 ```
 coordinator (Go) ──▶ Kafka: extract.tasks ──▶ extractor ×N (Python) ──▶ Garage (S3, RF=3)
-                                                     │
-                                                     ├──▶ Kafka: extract.results
-                                                     └──▶ Kafka: extract.tasks.dlq
+                                                 │   │
+                             gRPC Acquire/Report │   ├──▶ Kafka: extract.results
+                                                 ▼   └──▶ Kafka: extract.tasks.dlq
+                                        limiter (Go, AIMD)
+
+           extractor ──▶ Toxiproxy ──▶ ocds-mock (Go)        [profile: sim]
 ```
+
+Two task kinds flow through `extract.tasks`:
+
+| Kind | Planned from | Worker behaviour |
+|---|---|---|
+| `bulk_file` | `/files` index, one per (source, year, month) | Download zip, verify the published SHA-256 of the inner JSON, store |
+| `records_range` | Tender-id prefixes (`PLAN_API_PREFIX_LEN` / `PLAN_API_PREFIXES`) | Walk `/recordsAfter` from a synthetic cursor over one prefix, store each page under a deterministic key |
 
 | Component | Role | Distributed-systems topics it exercises |
 |---|---|---|
 | `services/coordinator` | Lists the portal's bulk files, plans one task per (source, year, month), publishes to Kafka | Work partitioning, message-oriented middleware |
-| `services/extractor` | Consumer group of workers: download, verify SHA-256, store, publish result | Horizontal scaling, consumer rebalancing, at-least-once delivery, idempotency, retries with backoff, dead-letter queue |
+| `services/extractor` | Consumer group of workers: download or crawl, verify, store, publish result | Horizontal scaling, consumer rebalancing, at-least-once delivery, idempotency, retries with backoff, circuit breaker, dead-letter queue |
+| `services/limiter` | gRPC service handing out permits from a token bucket whose rate adapts with additive-increase/multiplicative-decrease on p95 latency and throttling signals | Coordination, RPC, feedback control, graceful degradation (workers fall back to a local rate if it is down) |
+| `services/ocds-mock` | Portal replica with measured behaviour (WAF, page-size cap, latency that grows with concurrency); behind Toxiproxy for chaos | Fault injection, repeatable experiments |
 | Kafka (3 brokers, KRaft) | Durable task and result log, RF=3, `min.insync.replicas=2` | Replicated log, quorum writes, leader election per partition |
 | Garage (4 nodes) | S3-compatible object store for the Bronze layer | Replication, consistent hashing, CRDT-based metadata |
 | Prometheus, Grafana, Jaeger | Metrics and distributed tracing | Observability; one trace spans Go → Kafka → Python |
@@ -52,14 +64,18 @@ Plan window and worker count live in `.env` (`PLAN_SOURCES`, `PLAN_FROM`, `PLAN_
 `EXTRACTOR_REPLICAS`). Scale workers at runtime with `docker compose up -d --scale extractor=6`.
 
 The portal is a public government service: keep the plan window small during development and
-never run load or chaos experiments against it.
+never run load or chaos experiments against it. Use the simulation profile instead, see
+[docs/simulation.md](docs/simulation.md).
 
 ## Development
 
 ```sh
-# coordinator
+# any Go service: coordinator, limiter, ocds-mock
 docker run --rm -v "$PWD/services/coordinator:/src" -w /src golang:1.26-alpine \
   sh -c 'gofmt -l . && go vet ./... && go test ./...'
+
+# gRPC stubs, after editing proto/
+bash scripts/gen_proto.sh
 
 # extractor
 docker run --rm -v "$PWD/services/extractor:/app" -w /app python:3.12-slim \
@@ -71,7 +87,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 ## Roadmap
 
 1. ~~Distributed extraction~~ — coordinator, workers, Kafka, Garage, observability
-2. Adaptive global rate limiter and circuit breaker for the incremental `recordsAfter` API
+2. ~~Adaptive global rate limiter, circuit breaker, cursor-API crawling, simulation and chaos tooling~~
 3. Catalog: Dynamo-style key-value store (consistent hashing, quorum, vector clocks, gossip, Merkle anti-entropy)
 4. Record compiler: logical clocks and CRDT merge of out-of-order OCDS releases
 5. Silver: Spark cluster, batch and Structured Streaming with watermarks
