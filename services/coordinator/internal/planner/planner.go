@@ -10,12 +10,14 @@ import (
 
 type Task struct {
 	TaskID      string    `json:"task_id"`
+	Kind        string    `json:"kind"`
 	Source      string    `json:"source"`
-	Year        int       `json:"year"`
-	Month       int       `json:"month"`
-	URL         string    `json:"url"`
-	SHAURL      string    `json:"sha_url"`
-	PublishedAt time.Time `json:"published_at"`
+	Year        int       `json:"year,omitempty"`
+	Month       int       `json:"month,omitempty"`
+	URL         string    `json:"url,omitempty"`
+	SHAURL      string    `json:"sha_url,omitempty"`
+	PublishedAt string    `json:"published_at,omitempty"`
+	Prefix      string    `json:"prefix,omitempty"`
 	PlannedAt   time.Time `json:"planned_at"`
 }
 
@@ -56,12 +58,13 @@ func Plan(files []ocds.File, w Window, now time.Time) []Task {
 		}
 		tasks = append(tasks, Task{
 			TaskID:      fmt.Sprintf("%s-%04d-%02d", f.Source, f.Year, f.Month),
+			Kind:        KindBulkFile,
 			Source:      f.Source,
 			Year:        f.Year,
 			Month:       f.Month,
 			URL:         f.JSONURL,
 			SHAURL:      f.SHAURL,
-			PublishedAt: f.Published,
+			PublishedAt: f.Published.Format(time.RFC3339Nano),
 			PlannedAt:   now,
 		})
 	}

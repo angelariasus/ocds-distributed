@@ -117,7 +117,8 @@ func planRound(ctx context.Context, log *slog.Logger, tracer trace.Tracer, clien
 	}
 	filesListed.Set(float64(len(files)))
 
-	tasks := planner.Plan(files, cfg.Window, time.Now().UTC())
+	now := time.Now().UTC()
+	tasks := append(planner.Plan(files, cfg.Window, now), planner.PlanRanges(cfg.Ranges, now)...)
 	span.SetAttributes(attribute.Int("ocds.files", len(files)), attribute.Int("ocds.tasks", len(tasks)))
 
 	records := make([]*kgo.Record, 0, len(tasks))

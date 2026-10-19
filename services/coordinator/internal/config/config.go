@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ type Config struct {
 	TasksTopic   string
 	OCDSBaseURL  string
 	Window       planner.Window
+	Ranges       planner.RangeWindow
 	PlanInterval time.Duration
 	MetricsAddr  string
 }
@@ -37,11 +39,21 @@ func Load() (Config, error) {
 		sources[s] = true
 	}
 
+	prefixLen, err := strconv.Atoi(env("PLAN_API_PREFIX_LEN", "0"))
+	if err != nil {
+		return Config{}, fmt.Errorf("PLAN_API_PREFIX_LEN: %w", err)
+	}
+	prefixes := splitList(env("PLAN_API_PREFIXES", ""))
+	if len(prefixes) == 0 {
+		prefixes = planner.Prefixes(prefixLen)
+	}
+
 	return Config{
 		Brokers:      splitList(env("KAFKA_BROKERS", "localhost:19092")),
 		TasksTopic:   env("TASKS_TOPIC", "extract.tasks"),
 		OCDSBaseURL:  env("OCDS_BASE_URL", "https://contratacionesabiertas.oece.gob.pe/api/v1"),
 		Window:       planner.Window{Sources: sources, From: from, To: to},
+		Ranges:       planner.RangeWindow{Sources: splitList(env("PLAN_API_SOURCES", "")), Prefixes: prefixes},
 		PlanInterval: interval,
 		MetricsAddr:  env("METRICS_ADDR", ":2112"),
 	}, nil
