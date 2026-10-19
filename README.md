@@ -25,30 +25,13 @@ The measurements, including the ones that went wrong, are in [`docs/`](docs).
 
 ## Architecture
 
-```
-                         ┌──────────── coordinator ×3 (Go, own Raft) ────────────┐
-                         │ plans monthly files and API ranges as tasks            │
-                         ▼                                                        │
-  OCDS portal ◀── extractor ×N (Python) ◀── Kafka: extract.tasks                  │
-  (or ocds-mock      │   │   ▲                                                    │
-   + Toxiproxy)      │   │   └── limiter (Go, AIMD over gRPC)                     │
-                     │   └────── catalog ×5 (Go, Dynamo-style KV): crawl checkpoints
-                     ▼
-  BRONZE   Garage ×4 (S3) raw files  ──▶  Kafka: bronze.records
-                                               │
-                                     compiler ×2 (Go, CRDT + Lamport clocks)
-                                               ▼
-                                     Kafka: records.compiled (compacted)
-                                               │
-  SILVER   Spark cluster: batch flattening + Structured Streaming ──▶ Garage: Parquet by fiscal year
-                                               │
-  GOLD     gold-loader (saga, etcd lease, fencing token) ──▶ PostgreSQL ×3 (Patroni, HAProxy)
-                                               │                    └─ outbox ──▶ Kafka: gold.events
-  SERVE    clients ──JWT──▶ Envoy ──mTLS──▶ api ×3 (gRPC + REST) ──▶ PG replicas · Redis Cluster ×6 · ml ×2
+![End-to-end architecture: the OCDS portal feeds coordinated extractors, a Kafka event backbone with Bronze storage and a CRDT compiler, the Silver and Gold Medallion stages, and a replicated serving layer](docs/assets/architecture.png)
 
-  ledger (Go, RFC 6962 Merkle log) attests every Bronze file and Gold load; an independent auditor checks it.
-  Prometheus, Grafana and Jaeger observe everything; one trace spans Go → Kafka → Python.
-```
+Raw files land in Bronze (Garage), the compiler merges them into one record per process, Spark
+produces Silver, and a saga loads Gold into a Patroni-managed PostgreSQL cluster. The outbox
+publishes `gold.events` so the API replicas invalidate their shared cache. The bottom band applies
+to everything: mutual TLS and JWT, the Merkle ledger that attests every Bronze file and Gold
+load, and Prometheus and Jaeger for observability.
 
 | Component | What it does | Distributed-systems topics |
 |---|---|---|
