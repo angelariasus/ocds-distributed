@@ -23,6 +23,8 @@ x-kafka-env: &kafka-env
   KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
   KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
   KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  # The image defaults to /tmp/kraft-combined-logs; without this the named volume is never used.
+  KAFKA_LOG_DIRS: /var/lib/kafka/data
   KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
 x-garage: &garage
@@ -144,7 +146,7 @@ services:
       GARAGE_NODES: garage1,garage2,garage3,garage4
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:?set in .env}
       S3_SECRET_KEY: ${S3_SECRET_KEY:?set in .env}
-      S3_BUCKET: ${S3_BUCKET:-bronze}
+      S3_BUCKETS: bronze,silver,gold
     command: ["python", "-I", "/init/init.py"]
     volumes:
       - ./deploy/garage/init.py:/init/init.py:ro
@@ -197,6 +199,52 @@ services:
     hostname: catalog5
     volumes:
       - catalog5:/data
+
+  spark-master:
+    image: ocds-silver
+    build: ./services/silver
+    profiles: [silver]
+    entrypoint: ["/opt/spark/sbin/start-master.sh"]
+    command: ["--host", "spark-master", "--port", "7077", "--webui-port", "8080"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    ports: ["8083:8080"]
+
+  spark-worker:
+    image: ocds-silver
+    build: ./services/silver
+    profiles: [silver]
+    deploy:
+      replicas: ${SPARK_WORKERS:-2}
+    entrypoint: ["/opt/spark/sbin/start-worker.sh"]
+    command: ["spark://spark-master:7077", "--cores", "${SPARK_WORKER_CORES:-2}", "--memory", "${SPARK_WORKER_MEMORY:-1500m}"]
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    depends_on: [spark-master]
+
+  silver-batch:
+    image: ocds-silver
+    build: ./services/silver
+    profiles: [silver-jobs]
+    command: ["flatten_batch"]
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-1g}
+    depends_on: [spark-master]
+
+  silver-stream:
+    image: ocds-silver
+    build: ./services/silver
+    profiles: [silver-jobs]
+    command: ["stream_metrics"]
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      SPARK_DRIVER_MEMORY: ${SPARK_DRIVER_MEMORY:-1g}
+      WINDOW: ${STREAM_WINDOW:-1 day}
+      WATERMARK: ${STREAM_WATERMARK:-7 days}
+    depends_on: [spark-master]
 
   compiler:
     build: ./services/compiler

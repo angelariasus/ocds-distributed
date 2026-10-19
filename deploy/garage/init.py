@@ -8,7 +8,7 @@ TOKEN = os.environ["GARAGE_ADMIN_TOKEN"]
 NODES = os.environ["GARAGE_NODES"].split(",")
 ACCESS_KEY = os.environ["S3_ACCESS_KEY"]
 SECRET_KEY = os.environ["S3_SECRET_KEY"]
-BUCKET = os.environ["S3_BUCKET"]
+BUCKETS = [b.strip() for b in os.environ.get("S3_BUCKETS", os.environ.get("S3_BUCKET", "bronze")).split(",") if b.strip()]
 ZONE = os.environ.get("GARAGE_ZONE", "dc1")
 CAPACITY = int(os.environ.get("GARAGE_NODE_CAPACITY", str(10 * 1024**3)))
 
@@ -62,17 +62,17 @@ def main():
         call(seed, "POST", "ImportKey", {"accessKeyId": ACCESS_KEY, "secretAccessKey": SECRET_KEY, "name": "ocds"})
         print("key imported")
 
-    try:
-        bucket = call(seed, "GET", f"GetBucketInfo?globalAlias={BUCKET}")
-    except urllib.error.HTTPError:
-        bucket = call(seed, "POST", "CreateBucket", {"globalAlias": BUCKET})
-        print("bucket created:", BUCKET)
-
-    call(seed, "POST", "AllowBucketKey", {
-        "bucketId": bucket["id"],
-        "accessKeyId": ACCESS_KEY,
-        "permissions": {"read": True, "write": True, "owner": True},
-    })
+    for name in BUCKETS:
+        try:
+            bucket = call(seed, "GET", f"GetBucketInfo?globalAlias={name}")
+        except urllib.error.HTTPError:
+            bucket = call(seed, "POST", "CreateBucket", {"globalAlias": name})
+            print("bucket created:", name)
+        call(seed, "POST", "AllowBucketKey", {
+            "bucketId": bucket["id"],
+            "accessKeyId": ACCESS_KEY,
+            "permissions": {"read": True, "write": True, "owner": True},
+        })
     print("garage ready")
 
 
