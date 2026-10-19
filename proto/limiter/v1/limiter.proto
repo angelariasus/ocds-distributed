@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package limiter.v1;
+
+option go_package = "github.com/angelariasus/ocds-distributed/services/limiter/gen/limiterv1;limiterv1";
+
+// Global adaptive rate limiter shared by every worker that talks to an upstream.
+service Limiter {
+  // Blocks until a permit for the resource is available or the deadline expires.
+  rpc Acquire(AcquireRequest) returns (AcquireResponse);
+  // Feeds back the outcome of a call so the controller can adapt the rate.
+  rpc Report(ReportRequest) returns (ReportResponse);
+}
+
+message AcquireRequest {
+  string resource = 1;
+  string client_id = 2;
+}
+
+message AcquireResponse {
+  // How long the caller waited for the permit.
+  int64 waited_ms = 1;
+  // Rate in effect when the permit was granted, in permits per second.
+  double rate = 2;
+}
+
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  OUTCOME_OK = 1;
+  OUTCOME_THROTTLED = 2;
+  OUTCOME_ERROR = 3;
+}
+
+message ReportRequest {
+  string resource = 1;
+  string client_id = 2;
+  int64 latency_ms = 3;
+  Outcome outcome = 4;
+}
+
+message ReportResponse {}
