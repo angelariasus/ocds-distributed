@@ -36,3 +36,6 @@ class S3Store:
 
     def put_bytes(self, key: str, data: bytes, metadata: dict[str, str], content_type: str) -> None:
         self.client.put_object(Bucket=self.bucket, Key=key, Body=data, Metadata=metadata, ContentType=content_type)
+
+    def get_file(self, key: str, dest: Path) -> None:
+        self.client.download_file(self.bucket, key, str(dest))

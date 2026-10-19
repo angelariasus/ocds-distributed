@@ -50,12 +50,17 @@ class FakeSource:
 class FakeStore:
     def __init__(self):
         self.objects: dict[str, dict[str, str]] = {}
+        self.saved: dict[str, bytes] = {}
 
     def stored_sha(self, key: str) -> str | None:
         return self.objects.get(key, {}).get("sha256")
 
     def put(self, key: str, path: Path, metadata: dict[str, str]) -> None:
         self.objects[key] = metadata
+        self.saved[key] = path.read_bytes()
+
+    def get_file(self, key: str, dest: Path) -> None:
+        dest.write_bytes(self.saved[key])
 
 
 def extractor(source, store, attempts=3):
@@ -124,3 +129,50 @@ def test_inner_sha_rejects_unexpected_archive_layout(tmp_path):
 
     with pytest.raises(IntegrityError):
         inner_json_sha256(archive)
+
+
+class FakeEmitter:
+    def __init__(self):
+        self.archives = 0
+
+    def emit_archive(self, archive, source, file_id):
+        self.archives += 1
+        return 3
+
+
+class FakeCheckpoints:
+    def __init__(self):
+        self.data = {}
+
+    def get(self, key):
+        from extractor.catalog import Entry
+
+        return Entry(value=self.data[key], context=b"c") if key in self.data else None
+
+    def put(self, key, value, context=b""):
+        self.data[key] = value
+        return b"c"
+
+
+def test_stored_but_never_emitted_archive_is_replayed_from_the_store():
+    store, emitter, cps = FakeStore(), FakeEmitter(), FakeCheckpoints()
+    store.objects[TASK.object_key] = {"sha256": PAYLOAD_SHA}
+    store.saved[TASK.object_key] = make_zip(PAYLOAD)
+    source = FakeSource([make_zip(PAYLOAD)])
+    ex = Extractor(source, store, "w1", sleep=lambda _: None, emitter=emitter, checkpoints=cps)
+
+    first = ex.handle(TASK)
+    second = ex.handle(TASK)
+
+    assert (first.status, first.records) == ("reemitted", 3)
+    assert second.status == "skipped"
+    assert source.downloads == 0 and emitter.archives == 1
+    assert cps.data[f"emitted/{TASK.object_key}"]["sha256"] == PAYLOAD_SHA
+
+
+def test_new_download_is_marked_as_emitted():
+    store, emitter, cps = FakeStore(), FakeEmitter(), FakeCheckpoints()
+    ex = Extractor(FakeSource([make_zip(PAYLOAD)]), store, "w1", sleep=lambda _: None, emitter=emitter, checkpoints=cps)
+    assert ex.handle(TASK).status == "stored"
+    assert ex.handle(TASK).status == "skipped"
+    assert emitter.archives == 1

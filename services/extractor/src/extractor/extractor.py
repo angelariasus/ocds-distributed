@@ -21,6 +21,12 @@ class Source(Protocol):
 class Store(Protocol):
     def stored_sha(self, key: str) -> str | None: ...
     def put(self, key: str, path: Path, metadata: dict[str, str]) -> None: ...
+    def get_file(self, key: str, dest: Path) -> None: ...
+
+
+class Checkpoints(Protocol):
+    def get(self, key: str): ...
+    def put(self, key: str, value: dict, context: bytes = b"") -> bytes | None: ...
 
 
 class Crawler(Protocol):
@@ -45,11 +51,13 @@ class Extractor:
         sleep: Callable[[float], None] = time.sleep,
         crawler: Crawler | None = None,
         emitter: Emitter | None = None,
+        checkpoints: Checkpoints | None = None,
     ):
         self.source = source
         self.store = store
         self.crawler = crawler
         self.emitter = emitter
+        self.checkpoints = checkpoints
         self.worker_id = worker_id
         self.max_attempts = max_attempts
         self.backoff_seconds = backoff_seconds
@@ -75,7 +83,16 @@ class Extractor:
 
         expected = self.source.fetch_sha(task.sha_url)
         if self.store.stored_sha(task.object_key) == expected:
-            return self._result(task, "skipped", expected, 0, attempt)
+            if self._emitted(task, expected):
+                return self._result(task, "skipped", expected, 0, attempt)
+            # Stored before its records were ever published (or by an older version of the
+            # pipeline): replay them from the object store, not from the portal.
+            with tempfile.TemporaryDirectory() as tmp:
+                archive = Path(tmp) / "archive.zip"
+                self.store.get_file(task.object_key, archive)
+                records = self.emitter.emit_archive(archive, task.source, task.task_id)
+            self._mark_emitted(task, expected, records)
+            return self._result(task, "reemitted", expected, 0, attempt, records=records)
 
         with tempfile.TemporaryDirectory() as tmp:
             archive = Path(tmp) / "archive.zip"
@@ -94,7 +111,26 @@ class Extractor:
                 },
             )
             records = self.emitter.emit_archive(archive, task.source, task.task_id) if self.emitter else 0
+        if self.emitter:
+            self._mark_emitted(task, expected, records)
         return self._result(task, "stored", expected, size, attempt, records=records)
+
+    def _emitted_key(self, task: Task) -> str:
+        return f"emitted/{task.object_key}"
+
+    def _emitted(self, task: Task, sha: str) -> bool:
+        """True when this exact version's records were already published (or nothing tracks it)."""
+        if self.emitter is None or self.checkpoints is None:
+            return True
+        entry = self.checkpoints.get(self._emitted_key(task))
+        return bool(entry and entry.value and entry.value.get("sha256") == sha)
+
+    def _mark_emitted(self, task: Task, sha: str, records: int) -> None:
+        if self.checkpoints is None:
+            return
+        entry = self.checkpoints.get(self._emitted_key(task))
+        context = entry.context if entry else b""
+        self.checkpoints.put(self._emitted_key(task), {"sha256": sha, "records": records}, context)
 
     def _result(self, task: Task, status: str, sha: str, size: int, attempts: int, **counts: int) -> Result:
         prefix_dir = f"ocds/api/source={task.source}/prefix={task.prefix}/"

@@ -47,6 +47,7 @@ def main() -> None:
         backoff_seconds=settings.backoff_seconds,
         crawler=crawler,
         emitter=emitter,
+        checkpoints=catalog,
     )
     try:
         worker.run(extractor)
