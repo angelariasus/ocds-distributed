@@ -6,16 +6,19 @@ on:
   pull_request:
 
 jobs:
-  coordinator:
+  go:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [coordinator, limiter, ocds-mock]
     defaults:
       run:
-        working-directory: services/coordinator
+        working-directory: services/${{ matrix.service }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: services/coordinator/go.mod
+          go-version-file: services/${{ matrix.service }}/go.mod
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test -race ./...
@@ -35,10 +38,19 @@ jobs:
       - run: ruff format --check .
       - run: pytest
 
-  images:
+  proto:
     runs-on: ubuntu-latest
-    needs: [coordinator, extractor]
     steps:
       - uses: actions/checkout@v4
-      - run: docker build services/coordinator
-      - run: docker build services/extractor
+      - run: bash scripts/gen_proto.sh
+      - run: git diff --exit-code -- services/limiter/gen services/extractor/src/limiter
+
+  images:
+    runs-on: ubuntu-latest
+    needs: [go, extractor]
+    strategy:
+      matrix:
+        service: [coordinator, limiter, ocds-mock, extractor]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build services/${{ matrix.service }}
