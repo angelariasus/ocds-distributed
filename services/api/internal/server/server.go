@@ -42,15 +42,19 @@ type Reader interface {
 
 type Server struct {
 	queryv1.UnimplementedQueryServer
-	instance string
-	reader   Reader
-	cache    *cache.Cache
-	ml       mlv1.PredictorClient
-	mlWait   time.Duration
+	// Authorize wraps each REST handler with the policy for its operation;
+	// the default allows everything (development and tests).
+	Authorize func(operation string, next http.HandlerFunc) http.HandlerFunc
+	instance  string
+	reader    Reader
+	cache     *cache.Cache
+	ml        mlv1.PredictorClient
+	mlWait    time.Duration
 }
 
 func New(instance string, reader Reader, c *cache.Cache, ml mlv1.PredictorClient) *Server {
-	return &Server{instance: instance, reader: reader, cache: c, ml: ml, mlWait: 2 * time.Second}
+	allow := func(_ string, next http.HandlerFunc) http.HandlerFunc { return next }
+	return &Server{Authorize: allow, instance: instance, reader: reader, cache: c, ml: ml, mlWait: 2 * time.Second}
 }
 
 // cached runs compute through the cache and fills in provenance. Responses are
@@ -171,19 +175,19 @@ func grpcErr(err error) error {
 func (s *Server) REST() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("GET /v1/top-buyers", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/top-buyers", s.Authorize("top_buyers", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := s.TopBuyers(r.Context(), &queryv1.TopBuyersRequest{Year: queryInt(r, "year"), Limit: queryInt(r, "limit")})
 		s.respond(w, "top_buyers", resp, err)
-	})
-	mux.HandleFunc("GET /v1/buyers/{ruc}", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("GET /v1/buyers/{ruc}", s.Authorize("buyer", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := s.BuyerSummary(r.Context(), &queryv1.BuyerSummaryRequest{Ruc: r.PathValue("ruc"), Year: queryInt(r, "year")})
 		s.respond(w, "buyer", resp, err)
-	})
-	mux.HandleFunc("GET /v1/items", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("GET /v1/items", s.Authorize("items", func(w http.ResponseWriter, r *http.Request) {
 		resp, err := s.SearchItems(r.Context(), &queryv1.SearchItemsRequest{Texto: r.URL.Query().Get("q"), Year: queryInt(r, "year"), Limit: queryInt(r, "limit")})
 		s.respond(w, "items", resp, err)
-	})
-	mux.HandleFunc("POST /v1/predict/lead-time", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("POST /v1/predict/lead-time", s.Authorize("predict", func(w http.ResponseWriter, r *http.Request) {
 		var req queryv1.PredictLeadTimeRequest
 		body, _ := readBody(r)
 		if err := protojson.Unmarshal(body, &req); err != nil {
@@ -192,7 +196,7 @@ func (s *Server) REST() http.Handler {
 		}
 		resp, err := s.PredictLeadTime(r.Context(), &req)
 		s.respond(w, "predict", resp, err)
-	})
+	}))
 	return mux
 }
 

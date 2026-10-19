@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -23,13 +24,16 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/angelariasus/ocds-distributed/services/api/gen/mlv1"
 	"github.com/angelariasus/ocds-distributed/services/api/gen/queryv1"
+	"github.com/angelariasus/ocds-distributed/services/api/internal/authz"
 	"github.com/angelariasus/ocds-distributed/services/api/internal/cache"
+	"github.com/angelariasus/ocds-distributed/services/api/internal/mtls"
 	"github.com/angelariasus/ocds-distributed/services/api/internal/redisbackend"
 	"github.com/angelariasus/ocds-distributed/services/api/internal/server"
 	"github.com/angelariasus/ocds-distributed/services/api/internal/store"
@@ -76,10 +80,20 @@ func run(log *slog.Logger) error {
 
 	// Client-side load balancing: dns:///ml resolves to every ML replica and
 	// round_robin spreads calls across them without a proxy in between.
+	id := mtls.Identity{Cert: env("TLS_CERT", ""), Key: env("TLS_KEY", ""), CA: env("TLS_CA", "")}
+	mlCreds := insecure.NewCredentials()
+	if id.Enabled() {
+		cfg, err := id.Client()
+		if err != nil {
+			return err
+		}
+		mlCreds = credentials.NewTLS(cfg)
+	}
+
 	var ml mlv1.PredictorClient
 	if target := env("ML_TARGET", ""); target != "" {
 		conn, err := grpc.NewClient(target,
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithTransportCredentials(mlCreds),
 			grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`),
 			grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		)
@@ -91,22 +105,47 @@ func run(log *slog.Logger) error {
 	}
 
 	srv := server.New(instance, st, c, ml)
+	policy := authz.DefaultPolicy()
+	authRequired := env("AUTH_REQUIRED", "false") == "true"
+	if authRequired {
+		srv.Authorize = policy.HTTP
+	}
 	go invalidateOnLoads(ctx, log, c, instance)
 
-	grpcServer := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	grpcOpts := []grpc.ServerOption{grpc.StatsHandler(otelgrpc.NewServerHandler())}
+	var serverTLS *tls.Config
+	if id.Enabled() {
+		if serverTLS, err = id.Server(); err != nil {
+			return err
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(serverTLS)))
+	}
+	if authRequired {
+		grpcOpts = append(grpcOpts, grpc.ChainUnaryInterceptor(policy.Unary(map[string]string{
+			queryv1.Query_TopBuyers_FullMethodName:       "top_buyers",
+			queryv1.Query_BuyerSummary_FullMethodName:    "buyer",
+			queryv1.Query_SearchItems_FullMethodName:     "items",
+			queryv1.Query_PredictLeadTime_FullMethodName: "predict",
+		})))
+	}
+	grpcServer := grpc.NewServer(grpcOpts...)
 	queryv1.RegisterQueryServer(grpcServer, srv)
 	healthpb.RegisterHealthServer(grpcServer, health.NewServer())
 	lis, err := net.Listen("tcp", env("GRPC_ADDR", ":9000"))
 	if err != nil {
 		return err
 	}
-	rest := &http.Server{Addr: env("HTTP_ADDR", ":8000"), Handler: srv.REST(), ReadHeaderTimeout: 5 * time.Second}
+	rest := &http.Server{Addr: env("HTTP_ADDR", ":8000"), Handler: srv.REST(), ReadHeaderTimeout: 5 * time.Second, TLSConfig: serverTLS}
 	metrics := http.NewServeMux()
 	metrics.Handle("/metrics", promhttp.Handler())
 
 	go func() { _ = http.ListenAndServe(env("METRICS_ADDR", ":2116"), metrics) }()
 	go func() {
-		if err := rest.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		serve := rest.ListenAndServe
+		if serverTLS != nil {
+			serve = func() error { return rest.ListenAndServeTLS("", "") }
+		}
+		if err := serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("rest server failed", "error", err)
 		}
 	}()
@@ -117,7 +156,7 @@ func run(log *slog.Logger) error {
 		rest.Shutdown(shutdown)
 		grpcServer.GracefulStop()
 	}()
-	log.Info("api listening", "instance", instance, "grpc", lis.Addr().String(), "http", rest.Addr, "cache_ttl", ttl.String(), "ml", ml != nil)
+	log.Info("api listening", "mtls", id.Enabled(), "auth_required", authRequired, "instance", instance, "grpc", lis.Addr().String(), "http", rest.Addr, "cache_ttl", ttl.String(), "ml", ml != nil)
 	return grpcServer.Serve(lis)
 }
 
