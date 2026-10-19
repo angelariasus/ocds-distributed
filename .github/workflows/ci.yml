@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [coordinator, limiter, ocds-mock]
+        service: [coordinator, limiter, ocds-mock, catalog]
     defaults:
       run:
         working-directory: services/${{ matrix.service }}
@@ -43,14 +43,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash scripts/gen_proto.sh
-      - run: git diff --exit-code -- services/limiter/gen services/extractor/src/limiter
+      - run: git diff --exit-code -- services/limiter/gen services/catalog/gen services/extractor/src/limiter services/extractor/src/catalog
 
   images:
     runs-on: ubuntu-latest
     needs: [go, extractor]
     strategy:
       matrix:
-        service: [coordinator, limiter, ocds-mock, extractor]
+        service: [coordinator, limiter, ocds-mock, catalog, extractor]
     steps:
       - uses: actions/checkout@v4
       - run: docker build services/${{ matrix.service }}
