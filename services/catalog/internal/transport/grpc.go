@@ -9,6 +9,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/angelariasus/ocds-distributed/services/catalog/gen/catalogv1"
@@ -18,11 +19,18 @@ import (
 )
 
 type Client struct {
+	creds credentials.TransportCredentials
 	mu    sync.Mutex
 	conns map[string]*grpc.ClientConn
 }
 
-func NewClient() *Client { return &Client{conns: map[string]*grpc.ClientConn{}} }
+// NewClient dials peers with creds; nil means plaintext.
+func NewClient(creds credentials.TransportCredentials) *Client {
+	if creds == nil {
+		creds = insecure.NewCredentials()
+	}
+	return &Client{creds: creds, conns: map[string]*grpc.ClientConn{}}
+}
 
 func (c *Client) conn(addr string) (*grpc.ClientConn, error) {
 	c.mu.Lock()
@@ -31,7 +39,7 @@ func (c *Client) conn(addr string) (*grpc.ClientConn, error) {
 		return conn, nil
 	}
 	conn, err := grpc.NewClient(addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(c.creds),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 	if err != nil {

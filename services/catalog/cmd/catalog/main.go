@@ -141,7 +141,16 @@ func run(log *slog.Logger) error {
 	}
 	defer st.Close()
 
-	client := transport.NewClient()
+	tlsFiles := transport.TLSFromEnv()
+	clientCreds, err := tlsFiles.ClientCredentials()
+	if err != nil {
+		return err
+	}
+	serverCreds, err := tlsFiles.ServerCredentials()
+	if err != nil {
+		return err
+	}
+	client := transport.NewClient(clientCreds)
 	defer client.Close()
 
 	var n *node.Node
@@ -159,7 +168,7 @@ func run(log *slog.Logger) error {
 	)
 	n = node.New(cfg.node, st, members, client)
 
-	srv := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	srv := grpc.NewServer(grpc.Creds(serverCreds), grpc.StatsHandler(otelgrpc.NewServerHandler()))
 	catalogv1.RegisterCatalogServer(srv, &catalogServer{node: n, members: members})
 	catalogv1.RegisterInternalServer(srv, &internalServer{node: n, members: members, client: client, rpcTimeout: cfg.node.RPCTimeout})
 	healthpb.RegisterHealthServer(srv, health.NewServer())
@@ -188,7 +197,7 @@ func run(log *slog.Logger) error {
 		}
 	})
 
-	log.Info("catalog listening", "id", cfg.node.ID, "addr", cfg.node.Addr, "n", cfg.node.N, "r", cfg.node.R, "w", cfg.node.W,
+	log.Info("catalog listening", "mtls", tlsFiles.Enabled(), "id", cfg.node.ID, "addr", cfg.node.Addr, "n", cfg.node.N, "r", cfg.node.R, "w", cfg.node.W,
 		"seeds", len(cfg.seeds), "keys", st.Len(), "wal", walPath)
 	go func() {
 		<-ctx.Done()

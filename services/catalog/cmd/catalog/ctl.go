@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/angelariasus/ocds-distributed/services/catalog/gen/catalogv1"
+	"github.com/angelariasus/ocds-distributed/services/catalog/internal/transport"
 )
 
 // ctl is a small client for demos: catalog ctl [-addr host:port] status|get|put|delete ...
@@ -23,7 +23,15 @@ func ctl(args []string) error {
 	addr := fs.String("addr", env("CATALOG_ADDR", "localhost:7101"), "node to talk to")
 	r := fs.Uint("r", 0, "read quorum override")
 	w := fs.Uint("w", 0, "write quorum override")
+	files := transport.TLSFromEnv()
+	fs.StringVar(&files.Cert, "cert", files.Cert, "client certificate (empty for plaintext)")
+	fs.StringVar(&files.Key, "key", files.Key, "client key")
+	fs.StringVar(&files.CA, "ca", files.CA, "CA that signed the server certificate")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	creds, err := files.ClientCredentials()
+	if err != nil {
 		return err
 	}
 	rest := fs.Args()
@@ -31,7 +39,7 @@ func ctl(args []string) error {
 		return fmt.Errorf("usage: catalog ctl [-addr] status | get KEY | put KEY VALUE [CONTEXT] | delete KEY [CONTEXT]")
 	}
 
-	conn, err := grpc.NewClient(*addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(*addr, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		return err
 	}
