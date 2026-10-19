@@ -65,6 +65,14 @@ million rows. The parallel part of the job is cheap and the fixed part (JVM star
 shuffle, S3A commit) is not; extra executors on the same CPU add coordination without adding
 compute. ([silver.md](silver.md))
 
+## Discovery through DNS has a refresh window
+
+Right after the ML replicas were recreated, one prediction failed with `no children to pick from`:
+the API's gRPC resolver still held the old addresses. Envoy covers the same window on the REST side
+with retries and outlier ejection, which is why killing an API replica cost zero failed requests
+while the ML path showed one. Any DNS-based discovery needs either retries or a push-based
+resolver on top. ([serving.md](serving.md))
+
 ## Streaming numbers are not JSON numbers
 
 `ijson` yields `Decimal` for every number, and `json.dumps` rejects it; the bulk emitter failed on
