@@ -6,3 +6,6 @@ __pycache__/
 .venv/
 *.pyc
 /data/
+
+# Internal PKI: keys never leave the machine that generated them
+deploy/pki/
