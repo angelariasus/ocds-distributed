@@ -106,9 +106,19 @@ class PostgresWarehouse:
                 (token,),
             )
             rows = cur.rowcount
+            # Content digest of exactly what this load wrote; the audit ledger attests it.
+            cur.execute(
+                """SELECT encode(sha256(convert_to(coalesce(string_agg(
+                       ocid || '|' || coalesce(n_item, '') || '|' || coalesce(monto_adjudicado::text, '') || '|' || coalesce(monto_contratado::text, ''),
+                       E'
+' ORDER BY ocid, n_item), ''), 'UTF8')), 'hex')
+                     FROM gold.fact_items WHERE load_token = %s""",
+                (token,),
+            )
+            digest = cur.fetchone()[0]
             cur.execute(
                 "INSERT INTO gold.outbox (event_type, payload) VALUES ('gold.loaded', %s)",
-                (json.dumps({"token": token, "holder": holder, "years": years, "rows_fact": rows}),),
+                (json.dumps({"token": token, "holder": holder, "years": years, "rows_fact": rows, "digest": digest}),),
             )
             conn.commit()
         log.info("swap committed for token %d: years=%s fact rows=%d", token, years, rows)
