@@ -32,7 +32,7 @@ func (c *cluster) advance(d time.Duration) {
 func (c *cluster) Ping(_ context.Context, addr string, from Member, view []Member) ([]Member, error) {
 	c.mu.Lock()
 	target, ok := c.nodes[addr]
-	down := c.down[addr]
+	down := c.down[addr] || c.down[from.Addr]
 	c.mu.Unlock()
 	if !ok || down {
 		return nil, errors.New("unreachable")
@@ -52,6 +52,33 @@ func (c *cluster) PingReq(ctx context.Context, via string, target Member) (bool,
 	return err == nil, nil
 }
 
+// perNode is one node's view of the network: when the node itself is cut off,
+// nothing it sends gets through, including indirect probes.
+type perNode struct {
+	*cluster
+	self string
+}
+
+func (p perNode) isolated() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.down[p.self]
+}
+
+func (p perNode) Ping(ctx context.Context, addr string, from Member, view []Member) ([]Member, error) {
+	if p.isolated() {
+		return nil, errors.New("unreachable")
+	}
+	return p.cluster.Ping(ctx, addr, from, view)
+}
+
+func (p perNode) PingReq(ctx context.Context, via string, target Member) (bool, error) {
+	if p.isolated() {
+		return false, errors.New("unreachable")
+	}
+	return p.cluster.PingReq(ctx, via, target)
+}
+
 func newCluster(n int) (*cluster, []*List) {
 	c := &cluster{nodes: map[string]*List{}, down: map[string]bool{}, clock: time.Unix(1_700_000_000, 0)}
 	cfg := DefaultConfig()
@@ -59,7 +86,7 @@ func newCluster(n int) (*cluster, []*List) {
 	lists := make([]*List, n)
 	for i := range lists {
 		id, addr := "n"+string(rune('0'+i)), "addr"+string(rune('0'+i))
-		lists[i] = New(Member{ID: id, Addr: addr}, seeds, c, cfg, c.now, nil)
+		lists[i] = New(Member{ID: id, Addr: addr}, seeds, perNode{c, addr}, cfg, c.now, nil)
 		c.nodes[addr] = lists[i]
 	}
 	return c, lists
@@ -212,6 +239,37 @@ func TestRestartedNodeWithStaleIncarnationStaysDead(t *testing.T) {
 	for _, m := range lists[0].View() {
 		if m.ID == "n2" && m.State != Alive {
 			t.Fatalf("n0 sees n2 as %v after refutation", m.State)
+		}
+	}
+}
+
+func TestHealedPartitionMergesAfterBothSidesForgotEachOther(t *testing.T) {
+	c, lists := newCluster(4)
+	rounds(c, lists, 8)
+	// n3 is cut off in both directions while every node keeps running rounds.
+	c.mu.Lock()
+	c.down["addr3"] = true
+	c.mu.Unlock()
+	cfg := DefaultConfig()
+	for elapsed := time.Duration(0); elapsed < cfg.SuspectTimeout+cfg.DeadRetention+10*time.Second; elapsed += time.Second {
+		rounds(c, lists, 1)
+	}
+	if got := len(lists[3].View()); got != 1 {
+		t.Fatalf("isolated n3 still knows %d members; the test needs it to have forgotten the others", got)
+	}
+	for _, m := range lists[0].View() {
+		if m.ID == "n3" {
+			t.Fatalf("n0 still lists n3 as %v; the test needs it forgotten", m.State)
+		}
+	}
+
+	c.mu.Lock()
+	c.down["addr3"] = false
+	c.mu.Unlock()
+	rounds(c, lists, 3*cfg.ReconnectEvery)
+	for _, l := range lists {
+		if got := len(l.Alive()); got != 4 {
+			t.Fatalf("%s sees %d alive members after the partition healed, want 4", l.Self().ID, got)
 		}
 	}
 }

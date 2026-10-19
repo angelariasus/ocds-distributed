@@ -53,10 +53,14 @@ type Config struct {
 	DeadRetention  time.Duration // dead → forgotten
 	IndirectProbes int
 	RPCTimeout     time.Duration
+	// Every ReconnectEvery rounds the node also probes one seed it does not
+	// currently see as alive and one member it has declared dead. Without it a
+	// healed partition never merges back: each side has forgotten the other.
+	ReconnectEvery int
 }
 
 func DefaultConfig() Config {
-	return Config{SuspectTimeout: 10 * time.Second, DeadRetention: 2 * time.Minute, IndirectProbes: 2, RPCTimeout: 2 * time.Second}
+	return Config{SuspectTimeout: 10 * time.Second, DeadRetention: 2 * time.Minute, IndirectProbes: 2, RPCTimeout: 2 * time.Second, ReconnectEvery: 5}
 }
 
 type List struct {
@@ -69,6 +73,8 @@ type List struct {
 	mu      sync.Mutex
 	self    Member
 	members map[string]*Member
+	seeds   map[string]string
+	rounds  int
 }
 
 func New(self Member, seeds map[string]string, transport Transport, cfg Config, now func() time.Time, onChange func(Member)) *List {
@@ -82,9 +88,11 @@ func New(self Member, seeds map[string]string, transport Transport, cfg Config, 
 		onChange:  onChange,
 		self:      self,
 		members:   map[string]*Member{},
+		seeds:     map[string]string{},
 	}
 	for id, addr := range seeds {
 		if id != self.ID {
+			l.seeds[id] = addr
 			m := &Member{ID: id, Addr: addr, State: Alive, lastChange: now()}
 			l.members[id] = m
 		}
@@ -129,7 +137,12 @@ func (l *List) Alive() []Member {
 func (l *List) Round(ctx context.Context) {
 	l.mu.Lock()
 	l.self.Heartbeat++
+	l.rounds++
 	target := l.pickLocked()
+	var reconnect []Member
+	if l.cfg.ReconnectEvery > 0 && l.rounds%l.cfg.ReconnectEvery == 0 {
+		reconnect = l.reconnectTargetsLocked()
+	}
 	view := l.viewLocked()
 	self := l.self
 	l.mu.Unlock()
@@ -137,7 +150,42 @@ func (l *List) Round(ctx context.Context) {
 	if target != nil {
 		l.probe(ctx, *target, self, view)
 	}
+	for _, m := range reconnect {
+		pctx, cancel := context.WithTimeout(ctx, l.cfg.RPCTimeout)
+		remote, err := l.transport.Ping(pctx, m.Addr, self, view)
+		cancel()
+		if err == nil {
+			// Their view says they are alive with a fresher heartbeat (or a
+			// higher incarnation), which is what revives them in ours.
+			l.Merge(remote)
+		}
+	}
 	l.expire()
+}
+
+// reconnectTargetsLocked picks one seed not seen alive and one dead member.
+func (l *List) reconnectTargetsLocked() []Member {
+	var out []Member
+	var seedIDs []string
+	for id := range l.seeds {
+		if m, ok := l.members[id]; !ok || m.State == Dead {
+			seedIDs = append(seedIDs, id)
+		}
+	}
+	if len(seedIDs) > 0 {
+		id := seedIDs[l.rand.Intn(len(seedIDs))]
+		out = append(out, Member{ID: id, Addr: l.seeds[id]})
+	}
+	var dead []*Member
+	for _, m := range l.members {
+		if m.State == Dead && l.seeds[m.ID] == "" {
+			dead = append(dead, m)
+		}
+	}
+	if len(dead) > 0 {
+		out = append(out, *dead[l.rand.Intn(len(dead))])
+	}
+	return out
 }
 
 func (l *List) pickLocked() *Member {
@@ -243,6 +291,11 @@ func (l *List) Merge(remote []Member) {
 			continue
 		}
 		local, known := l.members[r.ID]
+		if !known && r.State == Dead {
+			// Learning about a node only to record that it is dead would let peers
+			// that have not expired it yet re-introduce it forever.
+			continue
+		}
 		if !known {
 			m := r
 			m.lastChange = l.now()
