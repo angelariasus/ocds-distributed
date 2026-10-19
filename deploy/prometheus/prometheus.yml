@@ -43,6 +43,10 @@ scrape_configs:
     static_configs:
       - targets: ["envoy:9901"]
 
+  - job_name: ledger
+    static_configs:
+      - targets: ["ledger:8100"]
+
   - job_name: catalog
     static_configs:
       - targets: ["catalog1:2114", "catalog2:2114", "catalog3:2114", "catalog4:2114", "catalog5:2114"]

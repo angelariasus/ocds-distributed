@@ -51,6 +51,9 @@ x-catalog: &catalog
     WRITE_QUORUM_W: ${CATALOG_W:-2}
     ANTI_ENTROPY_INTERVAL: ${CATALOG_ANTI_ENTROPY_INTERVAL:-30s}
     SUSPECT_TIMEOUT: ${CATALOG_SUSPECT_TIMEOUT:-10s}
+    TLS_CERT: /pki/catalog.crt
+    TLS_KEY: /pki/catalog.key
+    TLS_CA: /pki/ca.crt
 
 x-etcd: &etcd
   image: quay.io/coreos/etcd:v3.5.17
@@ -195,30 +198,35 @@ services:
     hostname: catalog1
     volumes:
       - catalog1:/data
+      - ./deploy/pki:/pki:ro
 
   catalog2:
     <<: *catalog
     hostname: catalog2
     volumes:
       - catalog2:/data
+      - ./deploy/pki:/pki:ro
 
   catalog3:
     <<: *catalog
     hostname: catalog3
     volumes:
       - catalog3:/data
+      - ./deploy/pki:/pki:ro
 
   catalog4:
     <<: *catalog
     hostname: catalog4
     volumes:
       - catalog4:/data
+      - ./deploy/pki:/pki:ro
 
   catalog5:
     <<: *catalog
     hostname: catalog5
     volumes:
       - catalog5:/data
+      - ./deploy/pki:/pki:ro
 
   spark-master:
     image: ocds-silver
@@ -428,6 +436,11 @@ services:
       S3_ENDPOINT: http://garage:3900
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
+      TLS_CERT: /pki/ml.crt
+      TLS_KEY: /pki/ml.key
+      TLS_CA: /pki/ca.crt
+    volumes:
+      - ./deploy/pki:/pki:ro
 
   ml-train:
     image: ocds-ml
@@ -452,6 +465,12 @@ services:
       ML_TARGET: dns:///ml:9000
       KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
       CACHE_TTL: ${CACHE_TTL:-5m}
+      TLS_CERT: /pki/api.crt
+      TLS_KEY: /pki/api.key
+      TLS_CA: /pki/ca.crt
+      AUTH_REQUIRED: "true"
+    volumes:
+      - ./deploy/pki:/pki:ro
     depends_on:
       redis-init: { condition: service_completed_successfully }
 
@@ -461,7 +480,33 @@ services:
     ports: ["8090:8090", "8091:8091", "9901:9901"]
     volumes:
       - ./deploy/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - ./deploy/pki:/etc/envoy/pki:ro
     depends_on: [api]
+
+  ledger:
+    image: ocds-ledger
+    build: ./services/ledger
+    profiles: [secure]
+    command: ["serve"]
+    ports: ["8100:8100"]
+    environment:
+      KAFKA_BROKERS: kafka1:9092,kafka2:9092,kafka3:9092
+      LEDGER_SIGNING_KEY: /pki/ledger-signing.key
+    volumes:
+      - ledger:/data
+      - ./deploy/pki:/pki:ro
+
+  ledger-auditor:
+    image: ocds-ledger
+    build: ./services/ledger
+    profiles: [secure-jobs]
+    command: ["audit"]
+    environment:
+      LEDGER_URL: http://ledger:8100
+      LEDGER_PUBLIC_KEY: /pki/ledger-signing.pub
+    volumes:
+      - ledger-auditor:/auditor
+      - ./deploy/pki/ledger-signing.pub:/pki/ledger-signing.pub:ro
 
   compiler:
     build: ./services/compiler
@@ -536,12 +581,19 @@ services:
       LIMITER_ADDR: limiter:7000
       CATALOG_ADDRS: catalog1:7100,catalog2:7100,catalog3:7100,catalog4:7100,catalog5:7100
       OBSERVATIONS_TOPIC: bronze.records
+      CATALOG_TLS_CA: /pki/ca.crt
+      CATALOG_TLS_CERT: /pki/extractor.crt
+      CATALOG_TLS_KEY: /pki/extractor.key
       S3_ENDPOINT: http://garage:3900
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_BUCKET: ${S3_BUCKET:-bronze}
+    volumes:
+      - ./deploy/pki:/pki:ro
 
 volumes:
+  ledger:
+  ledger-auditor:
   etcd1:
   etcd2:
   etcd3:

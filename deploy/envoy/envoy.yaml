@@ -25,6 +25,28 @@ static_resources:
                               num_retries: 2
                               per_try_timeout: 2s
                 http_filters:
+                  # 1. Drop any identity header a client tries to smuggle in.
+                  - name: envoy.filters.http.header_mutation
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+                      mutations:
+                        request_mutations:
+                          - remove: x-jwt-payload
+                  # 2. Authenticate: verify the bearer token and forward its verified payload.
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        ocds:
+                          issuer: ocds-distributed
+                          audiences: [ocds-api]
+                          local_jwks:
+                            filename: /etc/envoy/pki/jwks.json
+                          forward_payload_header: x-jwt-payload
+                      rules:
+                        - match: { prefix: /healthz }
+                        - match: { prefix: / }
+                          requires: { provider_name: ocds }
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -52,6 +74,26 @@ static_resources:
                               retry_on: "unavailable,reset,connect-failure"
                               num_retries: 2
                 http_filters:
+                  - name: envoy.filters.http.header_mutation
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+                      mutations:
+                        request_mutations:
+                          - remove: x-jwt-payload
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        ocds:
+                          issuer: ocds-distributed
+                          audiences: [ocds-api]
+                          local_jwks:
+                            filename: /etc/envoy/pki/jwks.json
+                          forward_payload_header: x-jwt-payload
+                      rules:
+                        - match: { prefix: /grpc.health.v1.Health }
+                        - match: { prefix: / }
+                          requires: { provider_name: ocds }
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -69,6 +111,21 @@ static_resources:
         endpoints:
           - lb_endpoints:
               - endpoint: { address: { socket_address: { address: api, port_value: 8000 } } }
+      # Mutual TLS to the replicas: Envoy proves it is Envoy, the replica proves it is "api".
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: api
+          common_tls_context:
+            tls_certificates:
+              - certificate_chain: { filename: /etc/envoy/pki/envoy.crt }
+                private_key: { filename: /etc/envoy/pki/envoy.key }
+            validation_context:
+              trusted_ca: { filename: /etc/envoy/pki/ca.crt }
+              match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher: { exact: api }
       # Passive health checking: a replica that keeps failing is ejected for a while.
       outlier_detection:
         consecutive_5xx: 3
@@ -96,6 +153,21 @@ static_resources:
         endpoints:
           - lb_endpoints:
               - endpoint: { address: { socket_address: { address: api, port_value: 9000 } } }
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: api
+          common_tls_context:
+            alpn_protocols: [h2]
+            tls_certificates:
+              - certificate_chain: { filename: /etc/envoy/pki/envoy.crt }
+                private_key: { filename: /etc/envoy/pki/envoy.key }
+            validation_context:
+              trusted_ca: { filename: /etc/envoy/pki/ca.crt }
+              match_typed_subject_alt_names:
+                - san_type: DNS
+                  matcher: { exact: api }
       outlier_detection:
         consecutive_gateway_failure: 3
         interval: 5s
