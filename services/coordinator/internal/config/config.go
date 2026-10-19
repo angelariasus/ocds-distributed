@@ -18,6 +18,11 @@ type Config struct {
 	Ranges       planner.RangeWindow
 	PlanInterval time.Duration
 	MetricsAddr  string
+
+	RaftID    string
+	RaftPeers map[string]string // other members: id → base URL
+	RaftAddr  string
+	DataDir   string
 }
 
 func Load() (Config, error) {
@@ -43,6 +48,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("PLAN_API_PREFIX_LEN: %w", err)
 	}
+	peers := map[string]string{}
+	self := env("RAFT_ID", "coordinator")
+	for _, p := range splitList(env("RAFT_PEERS", "")) {
+		id, url, ok := strings.Cut(p, "=")
+		if !ok {
+			return Config{}, fmt.Errorf("RAFT_PEERS entry %q must be id=url", p)
+		}
+		if id != self {
+			peers[id] = url
+		}
+	}
+
 	prefixes := splitList(env("PLAN_API_PREFIXES", ""))
 	if len(prefixes) == 0 {
 		prefixes = planner.Prefixes(prefixLen)
@@ -56,6 +73,10 @@ func Load() (Config, error) {
 		Ranges:       planner.RangeWindow{Sources: splitList(env("PLAN_API_SOURCES", "")), Prefixes: prefixes},
 		PlanInterval: interval,
 		MetricsAddr:  env("METRICS_ADDR", ":2112"),
+		RaftID:       env("RAFT_ID", "coordinator"),
+		RaftPeers:    peers,
+		RaftAddr:     env("RAFT_ADDR", ":7300"),
+		DataDir:      env("DATA_DIR", "/data"),
 	}, nil
 }
 
