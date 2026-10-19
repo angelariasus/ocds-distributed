@@ -18,6 +18,12 @@ class Settings:
     backoff_seconds: float
     metrics_port: int
     worker_id: str
+    ocds_base_url: str
+    limiter_addr: str
+    limiter_fallback_rate: float
+    page_size: int
+    breaker_failures: int
+    breaker_recovery_seconds: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -36,4 +42,10 @@ class Settings:
             backoff_seconds=float(env("BACKOFF_SECONDS", "2")),
             metrics_port=int(env("METRICS_PORT", "8000")),
             worker_id=env("WORKER_ID", socket.gethostname()),
+            ocds_base_url=env("OCDS_BASE_URL", "https://contratacionesabiertas.oece.gob.pe/api/v1"),
+            limiter_addr=env("LIMITER_ADDR", "localhost:7000"),
+            limiter_fallback_rate=float(env("LIMITER_FALLBACK_RATE", "0.5")),
+            page_size=int(env("PAGE_SIZE", "100")),
+            breaker_failures=int(env("BREAKER_FAILURES", "3")),
+            breaker_recovery_seconds=float(env("BREAKER_RECOVERY_SECONDS", "30")),
         )

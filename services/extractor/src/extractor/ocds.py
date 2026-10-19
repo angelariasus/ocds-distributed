@@ -17,6 +17,8 @@ class OcdsHttp:
         retry = Retry(total=5, backoff_factor=1.0, status_forcelist=[429, 500, 502, 503, 504])
         self.session.mount("https://", HTTPAdapter(max_retries=retry))
         self.session.mount("http://", HTTPAdapter(max_retries=retry))
+        self.raw_session = requests.Session()
+        self.raw_session.headers["User-Agent"] = USER_AGENT
 
     def fetch_sha(self, url: str) -> str:
         resp = self.session.get(url, timeout=self.timeout)
@@ -32,3 +34,8 @@ class OcdsHttp:
                     fh.write(chunk)
                     size += len(chunk)
         return size
+
+    def get_json(self, url: str) -> tuple[int, dict]:
+        resp = self.raw_session.get(url, timeout=self.timeout)
+        body = resp.json() if resp.status_code == 200 else {}
+        return resp.status_code, body

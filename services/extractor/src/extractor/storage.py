@@ -33,3 +33,6 @@ class S3Store:
             key,
             ExtraArgs={"Metadata": metadata, "ContentType": "application/zip"},
         )
+
+    def put_bytes(self, key: str, data: bytes, metadata: dict[str, str], content_type: str) -> None:
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=data, Metadata=metadata, ContentType=content_type)

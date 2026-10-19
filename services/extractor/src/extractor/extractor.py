@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .integrity import IntegrityError, inner_json_sha256
-from .models import Result, Task
+from .models import RECORDS_RANGE, Result, Task
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +20,10 @@ class Source(Protocol):
 class Store(Protocol):
     def stored_sha(self, key: str) -> str | None: ...
     def put(self, key: str, path: Path, metadata: dict[str, str]) -> None: ...
+
+
+class Crawler(Protocol):
+    def crawl(self, task: Task) -> tuple[int, int]: ...
 
 
 class ExhaustedError(Exception):
@@ -38,9 +42,11 @@ class Extractor:
         max_attempts: int = 4,
         backoff_seconds: float = 2.0,
         sleep: Callable[[float], None] = time.sleep,
+        crawler: Crawler | None = None,
     ):
         self.source = source
         self.store = store
+        self.crawler = crawler
         self.worker_id = worker_id
         self.max_attempts = max_attempts
         self.backoff_seconds = backoff_seconds
@@ -58,6 +64,12 @@ class Extractor:
         raise AssertionError("unreachable")
 
     def _process(self, task: Task, attempt: int) -> Result:
+        if task.kind == RECORDS_RANGE:
+            if self.crawler is None:
+                raise RuntimeError("records_range tasks need a crawler")
+            pages, records = self.crawler.crawl(task)
+            return self._result(task, "crawled", "", 0, attempt, pages=pages, records=records)
+
         expected = self.source.fetch_sha(task.sha_url)
         if self.store.stored_sha(task.object_key) == expected:
             return self._result(task, "skipped", expected, 0, attempt)
@@ -80,14 +92,16 @@ class Extractor:
             )
         return self._result(task, "stored", expected, size, attempt)
 
-    def _result(self, task: Task, status: str, sha: str, size: int, attempts: int) -> Result:
+    def _result(self, task: Task, status: str, sha: str, size: int, attempts: int, **counts: int) -> Result:
+        prefix_dir = f"ocds/api/source={task.source}/prefix={task.prefix}/"
         return Result(
             task_id=task.task_id,
             status=status,
-            object_key=task.object_key,
+            object_key=prefix_dir if task.kind == RECORDS_RANGE else task.object_key,
             sha256=sha,
             size_bytes=size,
             attempts=attempts,
             worker_id=self.worker_id,
             finished_at=datetime.now(UTC).isoformat(),
+            **counts,
         )

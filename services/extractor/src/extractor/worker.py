@@ -101,7 +101,13 @@ class Worker:
             DOWNLOADED_BYTES.inc(result.size_bytes)
             span.set_attribute("ocds.status", result.status)
             log.info(
-                "task %s %s (%d bytes, %d attempts)", task.task_id, result.status, result.size_bytes, result.attempts
+                "task %s %s (%d bytes, %d pages, %d records, %d attempts)",
+                task.task_id,
+                result.status,
+                result.size_bytes,
+                result.pages,
+                result.records,
+                result.attempts,
             )
             self.publish(self.settings.results_topic, msg.key(), result.to_json())
 
