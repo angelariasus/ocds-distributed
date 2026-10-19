@@ -8,7 +8,9 @@ dependencies = [
     "pandas>=2.2",
     "psycopg[binary]>=3.2",
     "pyarrow>=17",
+    "rapidfuzz>=3.9",
     "requests>=2.32",
+    "xlrd>=2.0.1",
 ]
 
 [project.optional-dependencies]

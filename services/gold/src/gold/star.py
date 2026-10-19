@@ -7,10 +7,18 @@ transaction, so the whole load is one consistent snapshot.
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 import pandas as pd
 
+from .pharma import Matcher, is_medicine, load_petitorio
+
 ESSALUD_RUC = "20131257750"
+
+
+@lru_cache(maxsize=1)
+def _matcher() -> Matcher:
+    return Matcher(load_petitorio())
 
 
 @dataclass
@@ -89,6 +97,12 @@ def build(items: pd.DataFrame) -> StarFrames:
         }
     ).drop_duplicates()
     item = item[item["descripcion"] != ""]
+    item["es_medicamento"] = item["clasificacion"].map(is_medicine)
+    matches = [_matcher().match(d) if med else None for d, med in zip(item["descripcion"], item["es_medicamento"], strict=True)]
+    item["petitorio_codigo"] = [m.codigo if m else None for m in matches]
+    item["petitorio_dci"] = [m.dci if m else None for m in matches]
+    item["petitorio_match"] = [m.method if m else None for m in matches]
+    item["petitorio_score"] = [m.score if m else None for m in matches]
 
     tipo_proceso = pd.DataFrame(
         {

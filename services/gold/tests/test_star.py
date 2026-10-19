@@ -39,6 +39,10 @@ def test_dimensions_are_deduplicated_and_normalised():
     assert star.entidad.iloc[0]["nombre"] == "SEGURO SOCIAL DE SALUD" and bool(star.entidad.iloc[0]["es_essalud"])
     assert dict(zip(star.proveedor["ruc"], star.proveedor["tipo"], strict=True)) == {"20100000001": "PERSONA JURIDICA", "10456789012": "PERSONA NATURAL"}
     assert len(star.item) == 3 and set(star.item["clasificacion"]) == {"51101500", "SIN-CLASIFICACION"}
+    meds = star.item[star.item["es_medicamento"]]
+    assert set(meds["descripcion"]) == {"PARACETAMOL 500 MG", "IBUPROFENO 400 MG"}
+    assert set(meds["petitorio_match"]) <= {"dci+concentracion", "dci", "fuzzy", "none"}
+    assert star.item[~star.item["es_medicamento"]]["petitorio_match"].isna().all()
     assert len(star.tipo_proceso) == 2
     assert sorted(star.tiempo["sk_tiempo"]) == [20250310, 20250320, 20260901, 20260910, 20260920]
 

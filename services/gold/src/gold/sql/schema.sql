@@ -82,6 +82,12 @@ CREATE TABLE IF NOT EXISTS gold.dim_item (
     descripcion   text NOT NULL,
     UNIQUE (clasificacion, descripcion)
 );
+-- Medicines: CUBSO segment 51, matched against EsSalud's Petitorio (see gold/pharma.py).
+ALTER TABLE gold.dim_item ADD COLUMN IF NOT EXISTS es_medicamento   boolean NOT NULL DEFAULT false;
+ALTER TABLE gold.dim_item ADD COLUMN IF NOT EXISTS petitorio_codigo text;
+ALTER TABLE gold.dim_item ADD COLUMN IF NOT EXISTS petitorio_dci    text;
+ALTER TABLE gold.dim_item ADD COLUMN IF NOT EXISTS petitorio_match  text;
+ALTER TABLE gold.dim_item ADD COLUMN IF NOT EXISTS petitorio_score  real;
 
 CREATE TABLE IF NOT EXISTS gold.dim_tipo_proceso (
     sk_tipo_proceso serial PRIMARY KEY,
@@ -120,3 +126,15 @@ CREATE TABLE IF NOT EXISTS gold.fact_items (
 
 CREATE INDEX IF NOT EXISTS fact_items_entidad ON gold.fact_items (fk_entidad);
 CREATE INDEX IF NOT EXISTS fact_items_proveedor ON gold.fact_items (fk_proveedor);
+
+-- EsSalud medicine purchases, one row per item, with the Petitorio status (analysis/essalud_medicines.sql).
+CREATE OR REPLACE VIEW gold.v_essalud_medicamentos AS
+SELECT f.*, i.descripcion, i.petitorio_match, i.petitorio_dci, t.metodo, t.detalles,
+       CASE WHEN i.petitorio_match IN ('dci+concentracion', 'dci', 'fuzzy') THEN 'en petitorio'
+            WHEN i.petitorio_match = 'dci-parcial' THEN 'combinacion parcial'
+            ELSE 'fuera de petitorio' END AS estado
+  FROM gold.fact_items f
+  JOIN gold.dim_item i ON i.sk_item = f.fk_item
+  JOIN gold.dim_entidad_compradora e ON e.sk_entidad = f.fk_entidad
+  JOIN gold.dim_tipo_proceso t ON t.sk_tipo_proceso = f.fk_tipo_proceso
+ WHERE e.es_essalud AND i.es_medicamento;

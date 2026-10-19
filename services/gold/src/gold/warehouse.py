@@ -18,7 +18,11 @@ DIMS = {
     "tiempo": ("gold.dim_tiempo", ["sk_tiempo", "fecha", "anio", "trimestre", "mes", "dia", "dia_semana"], "sk_tiempo"),
     "entidad": ("gold.dim_entidad_compradora", ["ruc", "nombre", "departamento", "es_essalud"], "ruc"),
     "proveedor": ("gold.dim_proveedor", ["ruc", "nombre", "tipo"], "ruc"),
-    "item": ("gold.dim_item", ["clasificacion", "descripcion"], "clasificacion, descripcion"),
+    "item": (
+        "gold.dim_item",
+        ["clasificacion", "descripcion", "es_medicamento", "petitorio_codigo", "petitorio_dci", "petitorio_match", "petitorio_score"],
+        "clasificacion, descripcion",
+    ),
     "tipo_proceso": ("gold.dim_tipo_proceso", ["metodo", "detalles"], "metodo, detalles"),
 }
 FACT_STAGING_COLUMNS = [
