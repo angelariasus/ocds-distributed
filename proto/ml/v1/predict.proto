@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package ml.v1;
+
+option go_package = "github.com/angelariasus/ocds-distributed/services/api/gen/mlv1;mlv1";
+
+// Model serving. Replicas load the same immutable model artifact from the
+// object store; the API balances calls across them client-side.
+service Predictor {
+  rpc PredictLeadTime(LeadTimeRequest) returns (LeadTimeResponse);
+  rpc ModelInfo(ModelInfoRequest) returns (ModelInfoResponse);
+}
+
+message LeadTimeRequest {
+  double monto_referencial = 1;
+  string metodo = 2;
+  string categoria = 3;
+  string departamento = 4;
+  bool es_essalud = 5;
+}
+
+message LeadTimeResponse {
+  double lead_time_dias = 1;
+  string model_version = 2;
+  string served_by = 3;
+}
+
+message ModelInfoRequest {}
+
+message ModelInfoResponse {
+  string version = 1;
+  string trained_at = 2;
+  int64 training_rows = 3;
+  double mae_dias = 4;
+  string served_by = 5;
+}

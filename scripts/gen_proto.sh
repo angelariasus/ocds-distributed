@@ -17,6 +17,8 @@ gen_go() { # service proto
 
 gen_go limiter proto/limiter/v1/limiter.proto
 gen_go catalog proto/catalog/v1/catalog.proto
+gen_go api proto/query/v1/query.proto
+gen_go api proto/ml/v1/predict.proto
 
 run python -m grpc_tools.protoc -I proto \
   --python_out=services/extractor/src --pyi_out=services/extractor/src --grpc_python_out=services/extractor/src \
@@ -24,5 +26,10 @@ run python -m grpc_tools.protoc -I proto \
 
 for pkg in limiter limiter/v1 catalog catalog/v1; do
   [ -f "services/extractor/src/$pkg/__init__.py" ] || : > "services/extractor/src/$pkg/__init__.py"
+done
+
+run python -m grpc_tools.protoc -I proto   --python_out=services/ml/src --pyi_out=services/ml/src --grpc_python_out=services/ml/src   proto/ml/v1/predict.proto
+for pkg in ml ml/v1; do
+  [ -f "services/ml/src/$pkg/__init__.py" ] || : > "services/ml/src/$pkg/__init__.py"
 done
 echo "stubs regenerated"

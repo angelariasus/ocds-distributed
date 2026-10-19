@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package query.v1;
+
+option go_package = "github.com/angelariasus/ocds-distributed/services/api/gen/queryv1;queryv1";
+
+// Read API over the Gold warehouse. Served by several stateless replicas
+// behind Envoy; answers come from read replicas and a shared Redis cache.
+service Query {
+  rpc TopBuyers(TopBuyersRequest) returns (TopBuyersResponse);
+  rpc BuyerSummary(BuyerSummaryRequest) returns (BuyerSummaryResponse);
+  rpc SearchItems(SearchItemsRequest) returns (SearchItemsResponse);
+  rpc PredictLeadTime(PredictLeadTimeRequest) returns (PredictLeadTimeResponse);
+}
+
+message TopBuyersRequest {
+  int32 year = 1;
+  int32 limit = 2;
+}
+
+message Buyer {
+  string ruc = 1;
+  string nombre = 2;
+  string departamento = 3;
+  bool es_essalud = 4;
+  int64 items = 5;
+  double monto_referencial = 6;
+  double monto_adjudicado = 7;
+}
+
+message TopBuyersResponse {
+  repeated Buyer buyers = 1;
+  Provenance provenance = 2;
+}
+
+message BuyerSummaryRequest {
+  string ruc = 1;
+  int32 year = 2;
+}
+
+message BuyerSummaryResponse {
+  Buyer buyer = 1;
+  int64 con_adenda = 2;
+  double lead_time_promedio_dias = 3;
+  double sobrecosto_promedio_pct = 4;
+  int64 proveedores = 5;
+  Provenance provenance = 6;
+}
+
+message SearchItemsRequest {
+  string texto = 1;
+  int32 year = 2;
+  int32 limit = 3;
+}
+
+message Item {
+  string ocid = 1;
+  string descripcion = 2;
+  string comprador = 3;
+  string proveedor = 4;
+  double cantidad = 5;
+  double monto_adjudicado = 6;
+  string fecha_convocatoria = 7;
+}
+
+message SearchItemsResponse {
+  repeated Item items = 1;
+  Provenance provenance = 2;
+}
+
+message PredictLeadTimeRequest {
+  double monto_referencial = 1;
+  string metodo = 2;
+  string categoria = 3;
+  string departamento = 4;
+  bool es_essalud = 5;
+}
+
+message PredictLeadTimeResponse {
+  double lead_time_dias = 1;
+  string model_version = 2;
+  string served_by = 3;
+}
+
+// Where an answer came from, so the demo can show caching and read routing.
+message Provenance {
+  string served_by = 1;      // api replica
+  bool cache_hit = 2;
+  string source = 3;         // "cache" | "replica"
+  int64 latency_ms = 4;
+}
